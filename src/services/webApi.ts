@@ -92,7 +92,6 @@ export async function createProfileFromWeb(
 
   const profile: UserProfile = {
     max_user_id: maxUserId,
-    platform: 'max',
     username,
     first_name: firstName,
     last_name: lastName,

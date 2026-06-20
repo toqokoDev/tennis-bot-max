@@ -34,7 +34,6 @@ export const env = {
   WEBHOOK_URL: requireEnv('WEBHOOK_URL'),
   PORT: parseIntEnv('PORT', 3000),
   DATA_DIR: path.resolve(requireEnv('DATA_DIR', './data')),
-  TELEGRAM_BOT_USERNAME: requireEnv('TELEGRAM_BOT_USERNAME', 'lab_bglk_bot'),
   LOG_LEVEL: requireEnv('LOG_LEVEL', 'info'),
 };
 
@@ -45,10 +44,4 @@ export function isAdmin(userId: number): boolean {
 export function getDeepLink(payload: string): string {
   const username = env.BOT_USERNAME.replace(/^@/, '');
   return `https://max.ru/${username}?start=${payload}`;
-}
-
-export function getTelegramDeepLink(payload: string = ''): string {
-  const username = env.TELEGRAM_BOT_USERNAME.replace(/^@/, '');
-  const base = `https://t.me/${username}`;
-  return payload ? `${base}?start=${payload}` : base;
 }

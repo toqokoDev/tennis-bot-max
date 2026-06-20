@@ -2,8 +2,6 @@ import { TXT, MENU_LABELS } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { beginCommandResponse, showCurrentMessage } from '../utils/bot.js';
-import { getCtxUserId } from '../context.js';
-import { getTelegramDeepLink } from '../config/env.js';
 import { hasProSubscription } from '../utils/validation.js';
 import { requireRegistered } from './registration.js';
 import { showToursMenu } from './tours.js';
@@ -18,8 +16,6 @@ function moreBackKeyboard(): ReturnType<typeof Keyboard.inlineKeyboard> {
 }
 
 export async function showMoreMenu(ctx: AppContext): Promise<void> {
-  const userId = getCtxUserId(ctx);
-  const tgLink = userId ? getTelegramDeepLink(`link_${userId}`) : getTelegramDeepLink();
   await showCurrentMessage(ctx, TXT.more.title, {
     attachments: [Keyboard.inlineKeyboard([
       [Keyboard.button.callback(TXT.more.tours, 'more_tours')],
@@ -34,7 +30,6 @@ export async function showMoreMenu(ctx: AppContext): Promise<void> {
       [
         Keyboard.button.callback(TXT.more.profile, 'profile'),
       ],
-      [Keyboard.button.link(TXT.more.go_to_telegram, tgLink)],
       [Keyboard.button.link(TXT.more.multi_day_tournaments, 'https://tennis-play.com/tournaments/')],
       [Keyboard.button.link(TXT.more.weekend_tournaments, 'https://tennis-play.com/tournaments/weekend/')],
       [Keyboard.button.link(TXT.more.website, 'https://tennis-play.com/')],

@@ -8,28 +8,11 @@ import { createProfileFromWeb } from '../services/webApi.js';
 import { sendRegistrationNotification } from '../services/channels.js';
 import { startRegistration } from './registration.js';
 import { getCtxUserId } from '../context.js';
-import { findUserByPlatformId, linkAccounts } from '../utils/platformLink.js';
 
 export async function handleStartPayload(ctx: AppContext, payload?: string | null): Promise<void> {
   const userId = getCtxUserId(ctx);
   const existing = await storage.getUser(userId);
   
-  if (payload?.startsWith('link_')) {
-    const telegramId = Number(payload.replace('link_', ''));
-    if (!Number.isNaN(telegramId) && userId) {
-      const tgUser = await findUserByPlatformId({ telegramId });
-      if (existing && tgUser) {
-        const linked = await linkAccounts(existing, tgUser.userId, tgUser.profile);
-        ctx.profile = linked;
-        await showStartWelcome(ctx, linked);
-        return;
-      }
-      if (!existing && tgUser) {
-        ctx.session.data = { ...ctx.session.data, link_telegram_id: telegramId };
-      }
-    }
-  }
-
   if (payload?.startsWith('ref_')) {
     const refId = Number(payload.replace('ref_', ''));
     if (!Number.isNaN(refId) && refId !== userId) {

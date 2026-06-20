@@ -16,8 +16,6 @@ export type SportType =
 
 export type SportCategory = 'court_sport' | 'outdoor_sport' | 'meeting' | 'dating';
 
-export type Platform = 'telegram' | 'max';
-
 export type UserRole = '🎯 Игрок' | '👨‍🏫 Тренер';
 export type Gender = 'Мужской' | 'Женский';
 
@@ -49,10 +47,6 @@ export interface GameOffer {
 
 export interface UserProfile {
   max_user_id: number;
-  telegram_id?: number;
-  platform?: Platform;
-  linked_telegram_id?: number;
-  linked_max_user_id?: number;
   username?: string;
   first_name: string;
   last_name: string;

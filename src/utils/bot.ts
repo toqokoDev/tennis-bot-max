@@ -5,8 +5,7 @@ import { getCtxUserId } from '../context.js';
 import { getPrevMessageId, setPrevMessageId, clearPrevMessageId } from '../middleware/session.js';
 import { calculateAge, getSportCategory, hasCourtPayment, hasVacation } from '../config/profile.js';
 import { saveProfileViewContext } from './gameHistory.js';
-import { env, getTelegramDeepLink, isAdmin } from '../config/env.js';
-import { formatPlatformLabel } from './platformLink.js';
+import { env, isAdmin } from '../config/env.js';
 import { TXT, fmt, MENU_LABELS } from '../texts.js';
 import type { UserProfile } from '../types/models.js';
 
@@ -145,7 +144,6 @@ export function formatProfileText(profile: UserProfile): string {
   const age = calculateAge(profile.birth_date);
   const lines = [
     `👤 ${profile.first_name} ${profile.last_name}`,
-    formatPlatformLabel(profile),
     `🎂 Возраст: ${formatAgeYears(age)}`,
     '',
   ];
@@ -193,8 +191,7 @@ export function profileKeyboard(
   options: { isOwn?: boolean; listBackPayload?: string; viewerId?: number } = {},
 ): AttachmentRequest[] {
   const { isOwn = false, listBackPayload, viewerId } = options;
-  type Btn = ReturnType<typeof Keyboard.button.callback> | ReturnType<typeof Keyboard.button.link>;
-  const buttons: Btn[][] = [];
+  const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
 
   if (isOwn) {
     buttons.push([Keyboard.button.callback(TXT.profile.edit, 'edit_profile')]);
@@ -207,8 +204,6 @@ export function profileKeyboard(
     ]);
     buttons.push([Keyboard.button.callback(TXT.profile.game_history, `game_history:${profile.max_user_id}`)]);
     buttons.push([Keyboard.button.callback(TXT.profile.delete, '1delete_profile')]);
-    const tgLink = getTelegramDeepLink(`link_${profile.max_user_id}`);
-    buttons.push([Keyboard.button.link(TXT.profile.go_to_telegram, tgLink)]);
   } else {
     buttons.push([
       Keyboard.button.callback(TXT.profile.contact, `profile_contact:${profile.max_user_id}`),

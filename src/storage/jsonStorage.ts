@@ -54,7 +54,7 @@ function dataPath(...parts: string[]): string {
 
 export class JsonStorage {
   private usersFile = dataPath('users.json');
-  private gamesFile = dataPath('games_max.json');
+  private gamesFile = dataPath('games.json');
   private tournamentsFile = dataPath('tournaments.json');
   private applicationsFile = dataPath('tournament_applications.json');
   private bannedFile = dataPath('banned_users.json');

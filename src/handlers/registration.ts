@@ -40,7 +40,6 @@ import {
 import { sendRegistrationNotification } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { processReferralOnRegistration } from '../utils/referral.js';
-import { tryLinkByPhone, findUserByPlatformId, linkAccounts } from '../utils/platformLink.js';
 
 type RegData = Partial<UserProfile> & { dating_interests_keys?: string[]; level_page?: number };
 
@@ -290,7 +289,6 @@ async function afterRole(ctx: AppContext, data: RegData, role: UserRole): Promis
 async function finishRegistration(ctx: AppContext, data: RegData, userId: number): Promise<void> {
   const profile: UserProfile = {
     max_user_id: userId,
-    platform: 'max',
     username: ctx.user?.username ?? ctx.profile?.username ?? undefined,
     first_name: data.first_name!,
     last_name: data.last_name!,
@@ -330,28 +328,18 @@ async function finishRegistration(ctx: AppContext, data: RegData, userId: number
   };
 
   await storage.saveUser(profile);
-  let linkedProfile = await tryLinkByPhone(profile);
-
-  const linkTelegramId = getStateData<{ link_telegram_id?: number }>(ctx).link_telegram_id;
-  if (linkTelegramId) {
-    const tgUser = await findUserByPlatformId({ telegramId: linkTelegramId });
-    if (tgUser) {
-      linkedProfile = await linkAccounts(linkedProfile, tgUser.userId, tgUser.profile);
-    }
-  }
-
   await processReferralOnRegistration(ctx);
-  await sendRegistrationNotification(ctx.api, linkedProfile);
+  await sendRegistrationNotification(ctx.api, profile);
   await clearState(ctx);
-  ctx.profile = linkedProfile;
+  ctx.profile = profile;
 
-  const profileText = formatProfileText(linkedProfile);
+  const profileText = formatProfileText(profile);
   const text = `${TXT.registration.complete}\n\n${profileText}`;
-  const attachments = profileKeyboard(linkedProfile, { isOwn: true, viewerId: userId });
-  if (linkedProfile.photo_path) {
+  const attachments = profileKeyboard(profile, { isOwn: true, viewerId: userId });
+  if (profile.photo_path) {
     attachments.unshift({
       type: 'image',
-      payload: { url: linkedProfile.photo_path },
+      payload: { url: profile.photo_path },
     });
   }
   await editButtons(ctx, text, attachments);
