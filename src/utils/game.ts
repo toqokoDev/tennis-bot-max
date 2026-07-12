@@ -23,10 +23,10 @@ const COURT_FLOW: GameStep[] = [
   'game_type', 'payment_type', 'competitive', 'comment', 'publish',
 ];
 
-const OUTDOOR_FLOW: GameStep[] = ['sport', 'city', 'date', 'time', 'comment', 'publish'];
-const MEETING_FLOW: GameStep[] = ['sport', 'city', 'date', 'time', 'comment', 'publish'];
+const OUTDOOR_FLOW: GameStep[] = ['sport', 'country', 'city', 'date', 'time', 'comment', 'publish'];
+const MEETING_FLOW: GameStep[] = ['sport', 'country', 'city', 'date', 'time', 'comment', 'publish'];
 const DATING_FLOW: GameStep[] = [
-  'sport', 'city', 'date', 'time', 'dating_goal', 'dating_interests', 'dating_additional', 'comment', 'publish',
+  'sport', 'country', 'city', 'date', 'time', 'dating_goal', 'dating_interests', 'dating_additional', 'comment', 'publish',
 ];
 
 export function getGameOfferFlow(sport: SportType): GameStep[] {
@@ -65,16 +65,68 @@ export function stepToState(step: GameStep): GameOfferStates {
   return map[step];
 }
 
-export function getNextGameStep(sport: SportType, current: GameStep, ctx: { city?: string }): GameStep | null {
+export type GameStepContext = {
+  city?: string;
+  country?: string;
+  district?: string;
+  date?: string;
+  time?: string;
+  game_type?: string;
+  payment_type?: string;
+  competitive?: boolean;
+  dating_goal?: string;
+  dating_interests?: string[];
+  dating_additional?: string;
+};
+
+export function isGameStepComplete(step: GameStep, ctx: GameStepContext): boolean {
+  switch (step) {
+    case 'sport':
+    case 'comment':
+    case 'publish':
+      return false;
+    case 'country':
+      return !!ctx.country;
+    case 'city':
+      return !!ctx.city;
+    case 'district':
+      return !!ctx.district || ctx.city !== 'Москва';
+    case 'date':
+      return !!ctx.date;
+    case 'time':
+      return !!ctx.time;
+    case 'game_type':
+      return !!ctx.game_type;
+    case 'payment_type':
+      return !!ctx.payment_type;
+    case 'competitive':
+      return ctx.competitive !== undefined;
+    case 'dating_goal':
+      return !!ctx.dating_goal;
+    case 'dating_interests':
+      return !!(ctx.dating_interests && ctx.dating_interests.length > 0);
+    case 'dating_additional':
+      return ctx.dating_additional !== undefined;
+    default:
+      return false;
+  }
+}
+
+function shouldSkipStep(step: GameStep, ctx: GameStepContext): boolean {
+  if (step === 'district' && ctx.city !== 'Москва') return true;
+  return isGameStepComplete(step, ctx);
+}
+
+export function getNextGameStep(sport: SportType, current: GameStep, ctx: GameStepContext): GameStep | null {
   const flow = getGameOfferFlow(sport);
   const idx = flow.indexOf(current);
-  if (idx < 0 || idx >= flow.length - 1) return null;
-  let next = flow[idx + 1];
-  if (next === 'district' && ctx.city !== 'Москва') {
-    const dIdx = flow.indexOf('district');
-    next = flow[dIdx + 1] ?? 'date';
+  if (idx < 0) return null;
+  for (let i = idx + 1; i < flow.length; i += 1) {
+    const step = flow[i];
+    if (step === 'publish') return 'publish';
+    if (!shouldSkipStep(step, ctx)) return step;
   }
-  return next;
+  return 'publish';
 }
 
 export function getFirstGameStep(sport: SportType): GameStep {
@@ -82,9 +134,8 @@ export function getFirstGameStep(sport: SportType): GameStep {
 }
 
 export function getStepAfterSport(sport: SportType): GameStep {
-  const flow = getGameOfferFlow(sport);
-  const idx = flow.indexOf('sport');
-  return flow[idx + 1] ?? 'city';
+  const next = getNextGameStep(sport, 'sport', {});
+  return next && next !== 'publish' ? next : 'country';
 }
 
 export const OFFER_WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];

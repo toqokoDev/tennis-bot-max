@@ -88,6 +88,16 @@ export interface UserProfile {
   dating_interests_keys?: string[];
   dating_additional?: string;
   meeting_time?: string;
+  offer_responses?: OfferResponse[];
+}
+
+export interface OfferResponse {
+  from_user_id: number;
+  from_name: string;
+  game_id: number;
+  comment: string;
+  status: 'new' | 'read';
+  response_date: string;
 }
 
 export interface BannedUser {

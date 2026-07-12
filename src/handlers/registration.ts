@@ -31,11 +31,15 @@ import {
   editText,
   formatProfileText,
   profileKeyboard,
+  promptButtons,
+  promptText,
 } from '../utils/bot.js';
 import {
   isValidDate,
   isValidPhone,
   normalizePhone,
+  isFutureOrTodayDate,
+  isDateRangeValid,
 } from '../utils/validation.js';
 import { sendRegistrationNotification } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
@@ -56,6 +60,7 @@ function sportNameForLevel(sport: SportType): string {
 }
 
 export async function startRegistration(ctx: AppContext): Promise<void> {
+  await clearState(ctx);
   await setState(ctx, RegistrationStates.PHONE, {});
   await editText(ctx, TXT.registration.welcome);
   await editText(ctx, TXT.registration.phone, {
@@ -69,7 +74,7 @@ async function showLevelsPage(ctx: AppContext, data: RegData, page: number): Pro
 
   if (config.levelType === 'table_tennis_rating') {
     await setState(ctx, RegistrationStates.TABLE_TENNIS_RATING, data);
-    await editText(ctx, TXT.registration.table_tennis_rating);
+    await promptText(ctx, TXT.registration.table_tennis_rating);
     return;
   }
 
@@ -102,11 +107,11 @@ async function showLevelsPage(ctx: AppContext, data: RegData, page: number): Pro
 
   data.level_page = safePage;
   await setState(ctx, RegistrationStates.PLAYER_LEVEL, data);
-  await editButtons(ctx, text, [Keyboard.inlineKeyboard(buttons)]);
+  await promptButtons(ctx, text, [Keyboard.inlineKeyboard(buttons)]);
 }
 
 async function showPaymentTypes(ctx: AppContext): Promise<void> {
-  await editButtons(ctx, TXT.registration.default_payment, [
+  await promptButtons(ctx, TXT.registration.default_payment, [
     Keyboard.inlineKeyboard(
       chunkButtons(PAYMENT_TYPES, (p) => Keyboard.button.callback(p, `regpay_${encodeURIComponent(p)}`), 1),
     ),
@@ -115,7 +120,7 @@ async function showPaymentTypes(ctx: AppContext): Promise<void> {
 
 async function showGender(ctx: AppContext, data: RegData): Promise<void> {
   await setState(ctx, RegistrationStates.GENDER, data);
-  await editButtons(ctx, TXT.registration.gender, [
+  await promptButtons(ctx, TXT.registration.gender, [
     Keyboard.inlineKeyboard(
       GENDERS.map((g) => [Keyboard.button.callback(g, `reggender_${encodeURIComponent(g)}`)]),
     ),
@@ -124,7 +129,7 @@ async function showGender(ctx: AppContext, data: RegData): Promise<void> {
 
 async function showDatingGoals(ctx: AppContext, data: RegData): Promise<void> {
   await setState(ctx, RegistrationStates.DATING_GOAL, data);
-  await editButtons(ctx, TXT.registration.dating_goal, [
+  await promptButtons(ctx, TXT.registration.dating_goal, [
     Keyboard.inlineKeyboard(
       chunkButtons(DATING_GOALS, (g) => Keyboard.button.callback(g.ru, `regdatinggoal_${g.key}`), 1),
     ),
@@ -145,7 +150,7 @@ async function showDatingInterests(ctx: AppContext, data: RegData): Promise<void
     text = `${TXT.registration.dating_interests_selected}\n${selectedLines.join('\n')}\n\n${TXT.registration.dating_interests_hint}`;
   }
 
-  await editButtons(ctx, text, [
+  await promptButtons(ctx, text, [
     Keyboard.inlineKeyboard([
       ...DATING_INTERESTS.map((i) => {
         const mark = selectedKeys.includes(i.key) ? '✅' : '⬜';
@@ -159,18 +164,18 @@ async function showDatingInterests(ctx: AppContext, data: RegData): Promise<void
 async function askProfileComment(ctx: AppContext, data: RegData): Promise<void> {
   const config = getSportFieldConfig(data.sport!);
   await setState(ctx, RegistrationStates.PROFILE_COMMENT, data);
-  await editText(ctx, config.aboutMeText ?? TXT.registration.profile_comment);
+  await promptText(ctx, config.aboutMeText ?? TXT.registration.profile_comment);
 }
 
 async function askMeetingTime(ctx: AppContext, data: RegData): Promise<void> {
   const config = getSportFieldConfig(data.sport!);
   await setState(ctx, RegistrationStates.MEETING_TIME, data);
-  await editText(ctx, config.meetingTimeText ?? TXT.registration.meeting_time);
+  await promptText(ctx, config.meetingTimeText ?? TXT.registration.meeting_time);
 }
 
 async function askPhoto(ctx: AppContext, data: RegData): Promise<void> {
   await setState(ctx, RegistrationStates.PHOTO, data);
-  await editButtons(ctx, TXT.registration.photo, [
+  await promptButtons(ctx, TXT.registration.photo, [
     Keyboard.inlineKeyboard([
       [Keyboard.button.callback(TXT.registration.photo_upload, 'reg_photo_upload')],
       [Keyboard.button.callback(TXT.registration.no_photo, 'reg_no_photo')],
@@ -182,7 +187,7 @@ async function askPhoto(ctx: AppContext, data: RegData): Promise<void> {
 async function askDatingAdditional(ctx: AppContext, data: RegData): Promise<void> {
   const fields = DATING_ADDITIONAL_FIELDS.map((f) => `• ${f}`).join('\n');
   await setState(ctx, RegistrationStates.DATING_ADDITIONAL, data);
-  await editText(ctx, fmt(TXT.registration.dating_additional, { fields }));
+  await promptText(ctx, fmt(TXT.registration.dating_additional, { fields }));
 }
 
 async function askLevelOrGender(ctx: AppContext, data: RegData): Promise<void> {
@@ -223,7 +228,7 @@ async function askAfterProfileComment(ctx: AppContext, data: RegData): Promise<v
 async function askVacationOrFinish(ctx: AppContext, data: RegData, userId: number): Promise<void> {
   if (data.sport && hasVacation(data.sport)) {
     await setState(ctx, RegistrationStates.VACATION_TENNIS, data);
-    await editButtons(ctx, TXT.registration.vacation_tennis, [
+    await promptButtons(ctx, TXT.registration.vacation_tennis, [
       Keyboard.inlineKeyboard([
         [Keyboard.button.callback(TXT.common.yes, 'regvac_yes'), Keyboard.button.callback(TXT.common.no, 'regvac_no')],
       ]),
@@ -231,6 +236,38 @@ async function askVacationOrFinish(ctx: AppContext, data: RegData, userId: numbe
     return;
   }
   await finishRegistration(ctx, data, userId);
+}
+
+async function askVacationCountry(ctx: AppContext, data: RegData): Promise<void> {
+  await setState(ctx, RegistrationStates.VACATION_COUNTRY, data);
+  await promptButtons(ctx, TXT.registration.vacation_country, [
+    Keyboard.inlineKeyboard(
+      chunkButtons(
+        [...Object.keys(COUNTRIES), TXT.registration.other_country],
+        (c) => Keyboard.button.callback(c, `regvaccountry_${encodeURIComponent(c)}`),
+        2,
+      ),
+    ),
+  ]);
+}
+
+async function askVacationCity(ctx: AppContext, data: RegData): Promise<void> {
+  const cities = COUNTRIES[data.vacation_country ?? ''] ?? [];
+  if (!cities.length) {
+    await setState(ctx, RegistrationStates.VACATION_CITY_INPUT, data);
+    await promptText(ctx, TXT.registration.vacation_city);
+    return;
+  }
+  await setState(ctx, RegistrationStates.VACATION_CITY, data);
+  await promptButtons(ctx, TXT.registration.vacation_city, [
+    Keyboard.inlineKeyboard(
+      chunkButtons(
+        [...cities, TXT.registration.other_city],
+        (c) => Keyboard.button.callback(c, `regvaccity_${encodeURIComponent(c)}`),
+        2,
+      ),
+    ),
+  ]);
 }
 
 async function askAfterPhoto(ctx: AppContext, data: RegData, userId: number): Promise<void> {
@@ -245,7 +282,7 @@ async function askAfterPhoto(ctx: AppContext, data: RegData, userId: number): Pr
 
 async function showRole(ctx: AppContext, data: RegData): Promise<void> {
   await setState(ctx, RegistrationStates.ROLE, data);
-  await editButtons(ctx, TXT.registration.role, [
+  await promptButtons(ctx, TXT.registration.role, [
     Keyboard.inlineKeyboard(
       ROLES.map((r) => [Keyboard.button.callback(r, `regrole_${encodeURIComponent(r)}`)]),
     ),
@@ -254,7 +291,7 @@ async function showRole(ctx: AppContext, data: RegData): Promise<void> {
 
 async function showMoscowDistricts(ctx: AppContext, data: RegData): Promise<void> {
   await setState(ctx, RegistrationStates.CITY, data);
-  await editButtons(ctx, TXT.registration.district, [
+  await promptButtons(ctx, TXT.registration.district, [
     Keyboard.inlineKeyboard(
       chunkButtons(MOSCOW_DISTRICTS, (d) => Keyboard.button.callback(d, `regdistrict_${d}`), 2),
     ),
@@ -280,13 +317,100 @@ async function afterRole(ctx: AppContext, data: RegData, role: UserRole): Promis
   data.role = role;
   if (role === '👨‍🏫 Тренер') {
     await setState(ctx, RegistrationStates.TRAINER_PRICE, data);
-    await editText(ctx, TXT.registration.trainer_price);
+    await promptText(ctx, TXT.registration.trainer_price);
     return;
   }
   await askLevelOrGender(ctx, data);
 }
 
+async function resumeIncompleteRegistration(ctx: AppContext, data: RegData): Promise<boolean> {
+  if (!data.phone) {
+    await setState(ctx, RegistrationStates.PHONE, data);
+    await promptText(ctx, TXT.registration.phone, {
+      attachments: [Keyboard.inlineKeyboard([[Keyboard.button.requestContact(TXT.registration.send_phone)]])],
+    });
+    return false;
+  }
+  if (!data.sport) {
+    await setState(ctx, RegistrationStates.SPORT, data);
+    await promptButtons(ctx, TXT.registration.sport, [sportKeyboard()]);
+    return false;
+  }
+  if (!data.first_name) {
+    await setState(ctx, RegistrationStates.FIRST_NAME, data);
+    await promptText(ctx, TXT.registration.first_name);
+    return false;
+  }
+  if (!data.last_name) {
+    await setState(ctx, RegistrationStates.LAST_NAME, data);
+    await promptText(ctx, TXT.registration.last_name);
+    return false;
+  }
+  if (!data.birth_date) {
+    await setState(ctx, RegistrationStates.BIRTH_DATE, data);
+    await promptText(ctx, TXT.registration.birth_date);
+    return false;
+  }
+  if (!data.country) {
+    await setState(ctx, RegistrationStates.COUNTRY, data);
+    await promptButtons(ctx, TXT.registration.country, [
+      Keyboard.inlineKeyboard(
+        chunkButtons(REG_COUNTRY_BUTTONS, (c) => Keyboard.button.callback(c, `regcountry_${encodeURIComponent(c)}`), 2),
+      ),
+    ]);
+    return false;
+  }
+  if (!data.city) {
+    await setState(ctx, RegistrationStates.CITY, data);
+    const cities = [...(COUNTRIES[data.country] ?? []), TXT.registration.other_city];
+    await promptButtons(ctx, TXT.registration.city, [
+      Keyboard.inlineKeyboard(
+        chunkButtons(cities, (c) => Keyboard.button.callback(c, `regcity_${encodeURIComponent(c)}`), 2),
+      ),
+    ]);
+    return false;
+  }
+
+  const config = getSportFieldConfig(data.sport);
+
+  // Order must match the live wizard: role → price → level → gender → dating/meeting → payment
+  if (config.hasRole && !data.role) {
+    await showRole(ctx, data);
+    return false;
+  }
+  if (config.hasRole && data.role === '👨‍🏫 Тренер' && (data.price === undefined || !Number.isFinite(data.price))) {
+    await setState(ctx, RegistrationStates.TRAINER_PRICE, data);
+    await promptText(ctx, TXT.registration.trainer_price);
+    return false;
+  }
+  if (config.hasLevel && !data.player_level) {
+    await showLevelsPage(ctx, data, data.level_page ?? 0);
+    return false;
+  }
+  if (!data.gender) {
+    await showGender(ctx, data);
+    return false;
+  }
+  if (config.hasDatingGoals && !data.dating_goal) {
+    await showDatingGoals(ctx, data);
+    return false;
+  }
+  if (config.hasMeetingTime && !data.meeting_time) {
+    await askMeetingTime(ctx, data);
+    return false;
+  }
+  if (config.hasPayment && !data.default_payment) {
+    await setState(ctx, RegistrationStates.DEFAULT_PAYMENT, data);
+    await showPaymentTypes(ctx);
+    return false;
+  }
+  return true;
+}
+
 async function finishRegistration(ctx: AppContext, data: RegData, userId: number): Promise<void> {
+  if (!(await resumeIncompleteRegistration(ctx, data))) return;
+
+  const config = getSportFieldConfig(data.sport!);
   const profile: UserProfile = {
     max_user_id: userId,
     username: ctx.user?.username ?? ctx.profile?.username ?? undefined,
@@ -299,9 +423,9 @@ async function finishRegistration(ctx: AppContext, data: RegData, userId: number
     district: data.district,
     role: (data.role ?? '🎯 Игрок') as UserRole,
     sport: data.sport!,
-    gender: (data.gender ?? 'Мужской') as Gender,
-    player_level: data.player_level ?? '3.0',
-    rating_points: data.rating_points ?? 1200,
+    gender: data.gender as Gender,
+    player_level: config.hasLevel ? data.player_level : undefined,
+    rating_points: config.hasLevel ? (data.rating_points ?? 1200) : 0,
     price: data.price,
     photo_path: data.photo_path,
     games_played: 0,
@@ -342,7 +466,7 @@ async function finishRegistration(ctx: AppContext, data: RegData, userId: number
       payload: { url: profile.photo_path },
     });
   }
-  await editButtons(ctx, text, attachments);
+  await promptButtons(ctx, text, attachments);
 }
 
 export async function handleRegistrationMessage(ctx: AppContext): Promise<boolean> {
@@ -358,39 +482,47 @@ export async function handleRegistrationMessage(ctx: AppContext): Promise<boolea
   if (state === RegistrationStates.PHONE) {
     const phone = ctx.contactInfo?.tel ?? text;
     if (!phone || !isValidPhone(phone)) {
-      await editText(ctx, TXT.registration.phone, {
+      await promptText(ctx, TXT.registration.phone, {
         attachments: [Keyboard.inlineKeyboard([[Keyboard.button.requestContact(TXT.registration.send_phone)]])],
       });
       return true;
     }
     data.phone = normalizePhone(phone);
     await setState(ctx, RegistrationStates.SPORT, data);
-    await editButtons(ctx, TXT.registration.sport, [sportKeyboard()]);
+    await promptButtons(ctx, TXT.registration.sport, [sportKeyboard()]);
     return true;
   }
 
-  if (state === RegistrationStates.FIRST_NAME && text) {
+  if (state === RegistrationStates.FIRST_NAME) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.first_name);
+      return true;
+    }
     data.first_name = text;
     await setState(ctx, RegistrationStates.LAST_NAME, data);
-    await editText(ctx, TXT.registration.last_name);
+    await promptText(ctx, TXT.registration.last_name);
     return true;
   }
 
-  if (state === RegistrationStates.LAST_NAME && text) {
+  if (state === RegistrationStates.LAST_NAME) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.last_name);
+      return true;
+    }
     data.last_name = text;
     await setState(ctx, RegistrationStates.BIRTH_DATE, data);
-    await editText(ctx, TXT.registration.birth_date);
+    await promptText(ctx, TXT.registration.birth_date);
     return true;
   }
 
-  if (state === RegistrationStates.BIRTH_DATE && text) {
-    if (!isValidDate(text)) {
-      await editText(ctx, TXT.registration.birth_date_invalid);
+  if (state === RegistrationStates.BIRTH_DATE) {
+    if (!text || !isValidDate(text)) {
+      await promptText(ctx, TXT.registration.birth_date_invalid);
       return true;
     }
     data.birth_date = text;
     await setState(ctx, RegistrationStates.COUNTRY, data);
-    await editButtons(ctx, TXT.registration.country, [
+    await promptButtons(ctx, TXT.registration.country, [
       Keyboard.inlineKeyboard(
         chunkButtons(REG_COUNTRY_BUTTONS, (c) => Keyboard.button.callback(c, `regcountry_${encodeURIComponent(c)}`), 2),
       ),
@@ -398,100 +530,140 @@ export async function handleRegistrationMessage(ctx: AppContext): Promise<boolea
     return true;
   }
 
-  if (state === RegistrationStates.COUNTRY_INPUT && text) {
+  if (state === RegistrationStates.COUNTRY_INPUT) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.enter_country);
+      return true;
+    }
     data.country = text;
     await setState(ctx, RegistrationStates.CITY_INPUT, data);
-    await editText(ctx, TXT.registration.enter_city);
+    await promptText(ctx, TXT.registration.enter_city);
     return true;
   }
 
-  if (state === RegistrationStates.CITY_INPUT && text) {
+  if (state === RegistrationStates.CITY_INPUT) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.enter_city);
+      return true;
+    }
     data.city = text;
     await afterCity(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.TRAINER_PRICE && text) {
-    data.price = Number(text);
+  if (state === RegistrationStates.TRAINER_PRICE) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.trainer_price);
+      return true;
+    }
+    const price = Number(text.replace(/\s/g, ''));
+    if (!Number.isInteger(price) || price < 0) {
+      await promptText(ctx, TXT.registration.trainer_price_invalid);
+      return true;
+    }
+    data.price = price;
     await askLevelOrGender(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.TABLE_TENNIS_RATING && text) {
+  if (state === RegistrationStates.TABLE_TENNIS_RATING) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.table_tennis_rating);
+      return true;
+    }
+    const numeric = Number(text.replace(',', '.'));
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      await promptText(ctx, TXT.registration.table_tennis_rating);
+      return true;
+    }
     data.player_level = text;
-    const numeric = Number(text);
-    data.rating_points = Number.isFinite(numeric) ? numeric : 1000;
+    data.rating_points = numeric;
     await showGender(ctx, data);
     return true;
   }
 
   if (state === RegistrationStates.PROFILE_COMMENT) {
-    if (text !== '/skip') data.profile_comment = text;
+    if (text && text !== '/skip') data.profile_comment = text;
     await askAfterProfileComment(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.MEETING_TIME && text) {
+  if (state === RegistrationStates.MEETING_TIME) {
+    if (!text) {
+      await askMeetingTime(ctx, data);
+      return true;
+    }
     data.meeting_time = text;
     await askPhoto(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.PHOTO && ctx.message?.body.attachments?.some((a) => a.type === 'image')) {
-    const image = ctx.message.body.attachments.find((a) => a.type === 'image');
-    const url = image && 'payload' in image ? (image.payload as { url?: string }).url : undefined;
-    if (url) {
-      data.photo_path = url;
-      await askAfterPhoto(ctx, data, userId);
+  if (state === RegistrationStates.PHOTO) {
+    const image = ctx.message?.body.attachments?.find((a) => a.type === 'image');
+    if (image && 'payload' in image) {
+      const url = (image.payload as { url?: string }).url;
+      if (url) {
+        data.photo_path = url;
+        await askAfterPhoto(ctx, data, userId);
+        return true;
+      }
     }
+    await askPhoto(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.VACATION_START && text) {
-    if (!isValidDate(text)) {
-      await editText(ctx, TXT.registration.birth_date_invalid);
+  if (state === RegistrationStates.VACATION_START) {
+    if (!text || !isValidDate(text) || !isFutureOrTodayDate(text)) {
+      await promptText(ctx, TXT.registration.vacation_date_invalid);
       return true;
     }
     data.vacation_start = text;
     await setState(ctx, RegistrationStates.VACATION_END, data);
-    await editText(ctx, TXT.registration.vacation_end);
+    await promptText(ctx, TXT.registration.vacation_end);
     return true;
   }
 
-  if (state === RegistrationStates.VACATION_END && text) {
-    if (!isValidDate(text)) {
-      await editText(ctx, TXT.registration.birth_date_invalid);
+  if (state === RegistrationStates.VACATION_END) {
+    if (!text || !isValidDate(text) || !data.vacation_start || !isDateRangeValid(data.vacation_start, text)) {
+      await promptText(ctx, TXT.registration.vacation_range_invalid);
       return true;
     }
     data.vacation_end = text;
     await setState(ctx, RegistrationStates.VACATION_COMMENT, data);
-    await editText(ctx, TXT.registration.vacation_comment);
+    await promptText(ctx, TXT.registration.vacation_comment);
     return true;
   }
 
   if (state === RegistrationStates.VACATION_COMMENT) {
-    data.vacation_comment = text ?? '';
+    data.vacation_comment = text && text !== '/skip' ? text : '';
     await finishRegistration(ctx, data, userId);
     return true;
   }
 
   if (state === RegistrationStates.DATING_ADDITIONAL) {
-    if (text !== '/skip') data.dating_additional = text;
+    if (text && text !== '/skip') data.dating_additional = text;
     await askPhoto(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.VACATION_COUNTRY_INPUT && text) {
+  if (state === RegistrationStates.VACATION_COUNTRY_INPUT) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.enter_country);
+      return true;
+    }
     data.vacation_country = text;
-    await setState(ctx, RegistrationStates.VACATION_CITY, data);
-    await editText(ctx, TXT.registration.vacation_city);
+    await askVacationCity(ctx, data);
     return true;
   }
 
-  if (state === RegistrationStates.VACATION_CITY_INPUT && text) {
+  if (state === RegistrationStates.VACATION_CITY_INPUT) {
+    if (!text) {
+      await promptText(ctx, TXT.registration.enter_city);
+      return true;
+    }
     data.vacation_city = text;
     await setState(ctx, RegistrationStates.VACATION_START, data);
-    await editText(ctx, TXT.registration.vacation_start);
+    await promptText(ctx, TXT.registration.vacation_start);
     return true;
   }
 
@@ -626,8 +798,7 @@ export function registerRegistrationHandlers(bot: import('@maxhub/max-bot-api').
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<RegData>(ctx);
     data.vacation_tennis = true;
-    await setState(ctx, RegistrationStates.VACATION_COUNTRY_INPUT, data);
-    await editText(ctx, TXT.registration.vacation_country);
+    await askVacationCountry(ctx, data);
   });
 
   bot.action('regvac_no', async (ctx) => {
@@ -635,6 +806,33 @@ export function registerRegistrationHandlers(bot: import('@maxhub/max-bot-api').
     const data = getStateData<RegData>(ctx);
     data.vacation_tennis = false;
     await finishRegistration(ctx, data, getCtxUserId(ctx));
+  });
+
+  bot.action(/^regvaccountry_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const country = decodeURIComponent(getCallbackPayload(ctx).replace('regvaccountry_', ''));
+    const data = getStateData<RegData>(ctx);
+    if (country === TXT.registration.other_country) {
+      await setState(ctx, RegistrationStates.VACATION_COUNTRY_INPUT, data);
+      await editText(ctx, TXT.registration.enter_country);
+      return;
+    }
+    data.vacation_country = country;
+    await askVacationCity(ctx, data);
+  });
+
+  bot.action(/^regvaccity_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const city = decodeURIComponent(getCallbackPayload(ctx).replace('regvaccity_', ''));
+    const data = getStateData<RegData>(ctx);
+    if (city === TXT.registration.other_city) {
+      await setState(ctx, RegistrationStates.VACATION_CITY_INPUT, data);
+      await editText(ctx, TXT.registration.enter_city);
+      return;
+    }
+    data.vacation_city = city;
+    await setState(ctx, RegistrationStates.VACATION_START, data);
+    await editText(ctx, TXT.registration.vacation_start);
   });
 
   bot.action(/^regdatinggoal_/, async (ctx) => {

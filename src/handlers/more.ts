@@ -2,11 +2,13 @@ import { TXT, MENU_LABELS } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { beginCommandResponse, showCurrentMessage } from '../utils/bot.js';
+import { isAdmin } from '../config/env.js';
 import { hasProSubscription } from '../utils/validation.js';
 import { requireRegistered } from './registration.js';
 import { showToursMenu } from './tours.js';
 import { startFindCoach } from './findCoach.js';
 import { startAllPlayers } from './allPlayers.js';
+import { getCtxUserId } from '../context.js';
 
 function moreBackKeyboard(): ReturnType<typeof Keyboard.inlineKeyboard> {
   return Keyboard.inlineKeyboard([
@@ -48,7 +50,7 @@ export function registerMoreHandlers(bot: import('@maxhub/max-bot-api').Bot<AppC
     await ctx.answerOnCallback({ notification: 'OK' });
     const user = await requireRegistered(ctx);
     if (!user) return;
-    if (!hasProSubscription(user)) {
+    if (!hasProSubscription(user) && !isAdmin(getCtxUserId(ctx))) {
       await showCurrentMessage(ctx, TXT.more.pro_required, { attachments: [moreBackKeyboard()] });
       return;
     }
@@ -59,10 +61,7 @@ export function registerMoreHandlers(bot: import('@maxhub/max-bot-api').Bot<AppC
     await ctx.answerOnCallback({ notification: 'OK' });
     const user = await requireRegistered(ctx);
     if (!user) return;
-    if (!hasProSubscription(user)) {
-      await showCurrentMessage(ctx, TXT.more.pro_required, { attachments: [moreBackKeyboard()] });
-      return;
-    }
+    // Reference: coach search is free; only "all players" is PRO-gated
     await startFindCoach(ctx);
   });
 

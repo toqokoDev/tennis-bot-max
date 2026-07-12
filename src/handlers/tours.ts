@@ -1,14 +1,19 @@
-import { TXT, fmt, MENU_LABELS } from '../texts.js';
+import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getMessageText } from '../context.js';
 import { COUNTRIES, SPORTS } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
-import { getState, getStateData, setState } from '../middleware/session.js';
+import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseToursStates, CreateTourStates } from '../types/states.js';
 import type { SportType } from '../types/models.js';
 import { chunkButtons, showCurrentMessage, askText } from '../utils/bot.js';
-import { isValidDate } from '../utils/validation.js';
+import {
+  isValidDate,
+  isFutureOrTodayDate,
+  isDateRangeValid,
+  parseRuDate,
+} from '../utils/validation.js';
 import { sendTourToChannel } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -23,6 +28,17 @@ export async function showToursMenu(ctx: AppContext): Promise<void> {
       [Keyboard.button.callback(TXT.tours.create, 'create_tour')],
       [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
     ])],
+  });
+}
+
+async function startCreateTour(ctx: AppContext): Promise<void> {
+  const user = await requireRegistered(ctx);
+  if (!user) return;
+  await setState(ctx, CreateTourStates.COUNTRY, {});
+  await showCurrentMessage(ctx, TXT.registration.vacation_country, {
+    attachments: [Keyboard.inlineKeyboard(
+      chunkButtons(Object.keys(COUNTRIES), (c) => Keyboard.button.callback(c, `ctcountry_${encodeURIComponent(c)}`), 2),
+    )],
   });
 }
 
@@ -55,7 +71,7 @@ export function registerToursHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     data.country = decodeURIComponent(getCallbackPayload(ctx).replace('tourcountry_', ''));
     const cities = COUNTRIES[data.country!] ?? [];
     await setState(ctx, BrowseToursStates.SELECT_CITY, data);
-    await showCurrentMessage(ctx, TXT.search.choose_city, {
+    await showCurrentMessage(ctx, fmt(TXT.search.choose_city, { country: data.country! }), {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(cities, (c) => Keyboard.button.callback(c, `tourcity_${encodeURIComponent(c)}`), 2),
       )],
@@ -68,15 +84,15 @@ export function registerToursHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     data.city = decodeURIComponent(getCallbackPayload(ctx).replace('tourcity_', ''));
     const all = await storage.getUsers();
     const now = new Date();
+    now.setHours(0, 0, 0, 0);
     const list = Object.values(all).filter((u) => {
       if (!u.vacation_tennis) return false;
       if (data.sport && u.sport !== data.sport) return false;
       if (data.country && u.vacation_country !== data.country) return false;
       if (data.city && u.vacation_city !== data.city) return false;
       if (u.vacation_end) {
-        const [, m, y] = u.vacation_end.split('.').map(Number);
-        const end = new Date(y, m - 1, u.vacation_end.split('.')[0] as unknown as number);
-        void end;
+        const end = parseRuDate(u.vacation_end);
+        if (end && end < now) return false;
       }
       return true;
     });
@@ -91,14 +107,13 @@ export function registerToursHandlers(bot: import('@maxhub/max-bot-api').Bot<App
 
   bot.action('create_tour', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    const user = await requireRegistered(ctx);
-    if (!user) return;
-    await setState(ctx, CreateTourStates.COUNTRY, {});
-    await showCurrentMessage(ctx, TXT.registration.vacation_country, {
-      attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(Object.keys(COUNTRIES), (c) => Keyboard.button.callback(c, `ctcountry_${encodeURIComponent(c)}`), 2),
-      )],
-    });
+    await startCreateTour(ctx);
+  });
+
+  // Alias for legacy callback used in some older messages
+  bot.action(/^createTour/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    await startCreateTour(ctx);
   });
 
   bot.action(/^ctcountry_/, async (ctx) => {
@@ -129,31 +144,42 @@ export async function handleTourMessage(ctx: AppContext): Promise<boolean> {
   const text = getMessageText(ctx);
   const data = getStateData<TourCreateData>(ctx);
   const user = await requireRegistered(ctx);
-  if (!user || !text) return false;
+  if (!user) return false;
 
   if (state === CreateTourStates.START_DATE) {
-    if (!isValidDate(text)) return true;
+    if (!text || !isValidDate(text) || !isFutureOrTodayDate(text)) {
+      await askText(ctx, TXT.registration.vacation_date_invalid);
+      return true;
+    }
     data.start = text;
     await setState(ctx, CreateTourStates.END_DATE, data);
     await askText(ctx, TXT.registration.vacation_end);
     return true;
   }
   if (state === CreateTourStates.END_DATE) {
-    if (!isValidDate(text)) return true;
+    if (!text || !isValidDate(text) || !data.start || !isDateRangeValid(data.start, text)) {
+      await askText(ctx, TXT.registration.vacation_range_invalid);
+      return true;
+    }
     data.end = text;
     await setState(ctx, CreateTourStates.COMMENT, data);
     await askText(ctx, TXT.registration.vacation_comment);
     return true;
   }
   if (state === CreateTourStates.COMMENT) {
+    if (!text) {
+      await askText(ctx, TXT.registration.vacation_comment);
+      return true;
+    }
     user.vacation_tennis = true;
     user.vacation_country = data.country;
     user.vacation_city = data.city;
     user.vacation_start = data.start;
     user.vacation_end = data.end;
-    user.vacation_comment = text;
+    user.vacation_comment = text === '/skip' ? '' : text;
     await storage.saveUser(user);
     await sendTourToChannel(ctx.api, user);
+    await clearState(ctx);
     await ctx.reply(TXT.tours.published);
     return true;
   }

@@ -3,7 +3,10 @@ import type { CompletedGame, RatingUpdate, UserProfile } from '../types/models.j
 
 export function fullName(user: UserProfile | undefined): string {
   if (!user) return '—';
-  return `${user.first_name} ${user.last_name}`.trim();
+  const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+  if (name) return name;
+  if (user.username) return `@${user.username}`;
+  return 'Пользователь';
 }
 
 export function formatRatingLine(name: string, oldPoints: number, newPoints: number): string {

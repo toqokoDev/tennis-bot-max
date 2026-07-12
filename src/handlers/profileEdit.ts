@@ -227,9 +227,14 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
       await askText(ctx, TXT.profile.rating_invalid);
       return true;
     }
-    const level = calculateLevelFromPoints(rating, user.sport);
-    user.player_level = level;
-    user.rating_points = rating;
+    const config = getSportFieldConfig(user.sport);
+    if (config.levelType === 'table_tennis_rating') {
+      user.player_level = String(rating);
+      user.rating_points = rating;
+    } else {
+      user.player_level = calculateLevelFromPoints(rating, user.sport);
+      user.rating_points = rating;
+    }
     user.rating_edited = true;
     await saveProfile(ctx, user);
     await clearState(ctx);
@@ -237,8 +242,12 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
     return true;
   }
 
-  if (state === EditProfileStates.DATING_ADDITIONAL && text) {
-    user.dating_additional = text;
+  if (state === EditProfileStates.DATING_ADDITIONAL) {
+    if (!text) {
+      await askText(ctx, TXT.profile.enter_dating_additional);
+      return true;
+    }
+    user.dating_additional = text === '/skip' ? '' : text;
     await saveProfile(ctx, user);
     await clearState(ctx);
     await showOwnProfile(ctx, user, 'new');

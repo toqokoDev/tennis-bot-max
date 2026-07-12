@@ -4,10 +4,10 @@ import type { AppContext } from '../context.js';
 import { getCtxUserId, getMessageText } from '../context.js';
 import { SPORTS, getSportCategory } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
-import { clearState, getState, getStateData, setState } from '../middleware/session.js';
+import { getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseOffersStates } from '../types/states.js';
 import type { GameOffer, SportType, UserProfile } from '../types/models.js';
-import { backButton, chunkButtons, paginate, showCurrentMessage } from '../utils/bot.js';
+import { chunkButtons, paginate, showCurrentMessage } from '../utils/bot.js';
 import { notifyUser } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -299,7 +299,6 @@ export function registerBrowseOffersHandlers(bot: import('@maxhub/max-bot-api').
   });
 
   bot.action(/^viewoffer_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
     const parts = getCallbackPayload(ctx).replace('viewoffer_', '').split('_');
     const gameId = Number(parts.pop());
     const userId = Number(parts.join('_'));
@@ -310,6 +309,7 @@ export function registerBrowseOffersHandlers(bot: import('@maxhub/max-bot-api').
       await ctx.answerOnCallback({ notification: 'Предложение не найдено' });
       return;
     }
+    await ctx.answerOnCallback({ notification: 'OK' });
 
     const text = formatOfferDetail(author, offer, viewerId);
     const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
@@ -381,6 +381,19 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
   const author = await storage.getUser(userId);
   const offer = author?.games.find((g) => g.id === gameId);
 
+  if (author) {
+    if (!author.offer_responses) author.offer_responses = [];
+    author.offer_responses.push({
+      from_user_id: responder.max_user_id,
+      from_name: `${responder.first_name} ${responder.last_name}`.trim(),
+      game_id: gameId,
+      comment,
+      status: 'new',
+      response_date: new Date().toISOString(),
+    });
+    await storage.saveUser(author);
+  }
+
   await notifyUser(
     ctx.api,
     userId,
@@ -390,7 +403,12 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
   );
 
   data.respondOffer = undefined;
-  await clearState(ctx);
-  await showCurrentMessage(ctx, TXT.game_offers.respond_sent, { attachments: [backButton()] }, 'edit');
+  await setState(ctx, BrowseOffersStates.LIST, data);
+  await showCurrentMessage(ctx, TXT.game_offers.respond_sent, {
+    attachments: [Keyboard.inlineKeyboard([
+      [Keyboard.button.callback(TXT.game_offers.browse_back_list, 'browse_back_list')],
+      [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+    ])],
+  }, 'edit');
   return true;
 }

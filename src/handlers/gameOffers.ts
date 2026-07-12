@@ -32,6 +32,27 @@ import { canCreateFreeOffer, hasProSubscription, isValidShortDate, isValidTime, 
 import { sendGameOfferToChannel } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
+import { logger } from '../logger.js';
+
+type OfferActionHandler = (ctx: AppContext) => Promise<string | void>;
+
+function onOfferAction(
+  bot: import('@maxhub/max-bot-api').Bot<AppContext>,
+  trigger: string | RegExp,
+  handler: OfferActionHandler,
+): void {
+  bot.action(trigger, async (ctx) => {
+    let notification = 'OK';
+    try {
+      const custom = await handler(ctx);
+      if (custom) notification = custom;
+    } catch (err) {
+      logger.error('Game offer action failed', { err, payload: ctx.callback?.payload });
+      notification = 'Ошибка';
+    }
+    await ctx.answerOnCallback({ notification });
+  });
+}
 
 type OfferData = Partial<GameOffer> & {
   step?: GameStep;
@@ -170,20 +191,14 @@ export async function startNewOffer(ctx: AppContext, sport?: SportType): Promise
     return;
   }
 
+  ctx.session.data = {};
   const data: OfferData = {
     sport: sport ?? user.sport,
-    country: user.country,
-    city: user.city,
   };
 
-  if (sport) {
-    data.step = getStepAfterSport(sport);
-    await setState(ctx, stepToState(data.step), data);
-    await promptStep(ctx, data);
-    return;
-  }
-
-  const step = getFirstGameStep(data.sport!);
+  // With an explicit sport (new_offer_{sport}) skip the sport picker.
+  // Without it, start from the beginning of the flow for the profile sport.
+  const step = sport ? getStepAfterSport(data.sport!) : getFirstGameStep(data.sport!);
   data.step = step;
   await setState(ctx, stepToState(step), data);
   await promptStep(ctx, data);
@@ -289,7 +304,7 @@ async function promptStep(ctx: AppContext, data: OfferData, mode: 'new' | 'edit'
 }
 
 async function advance(ctx: AppContext, data: OfferData, mode: 'new' | 'edit' = 'edit'): Promise<void> {
-  const next = getNextGameStep(data.sport!, data.step!, { city: data.city });
+  const next = getNextGameStep(data.sport!, data.step!, data);
   if (!next || next === 'publish') {
     await publishOffer(ctx, data);
     return;
@@ -432,27 +447,32 @@ export async function handleGameOfferMessage(ctx: AppContext): Promise<boolean> 
 }
 
 export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
-  bot.action('new_offer', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'new_offer', async (ctx) => {
     await startNewOffer(ctx);
   });
 
-  bot.action(/^new_offer_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^new_offer_/, async (ctx) => {
     const sport = decodeURIComponent(getCallbackPayload(ctx).replace('new_offer_', '')) as SportType;
     await startNewOffer(ctx, sport);
   });
 
-  bot.action(/^gamesport_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamesport_/, async (ctx) => {
+    const user = await requireRegistered(ctx);
+    if (!user) return;
     const data = getStateData<OfferData>(ctx);
     data.sport = decodeURIComponent(getCallbackPayload(ctx).replace('gamesport_', '')) as SportType;
+    // Clear location/dating so changing sport restarts those steps
+    delete data.country;
+    delete data.city;
+    delete data.district;
+    delete data.dating_goal;
+    delete data.dating_interests;
+    delete data.dating_additional;
     data.step = 'sport';
     await advance(ctx, data);
   });
 
-  bot.action(/^gamecountry_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamecountry_/, async (ctx) => {
     const raw = decodeURIComponent(getCallbackPayload(ctx).replace('gamecountry_', ''));
     const data = getStateData<OfferData>(ctx);
     if (raw === TXT.registration.other_country) {
@@ -466,8 +486,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     await advance(ctx, data);
   });
 
-  bot.action(/^gamecity_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamecity_/, async (ctx) => {
     const raw = decodeURIComponent(getCallbackPayload(ctx).replace('gamecity_', ''));
     const data = getStateData<OfferData>(ctx);
     if (raw === TXT.registration.other_city) {
@@ -481,23 +500,20 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     await advance(ctx, data);
   });
 
-  bot.action(/^gamedistrict_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamedistrict_/, async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.district = getCallbackPayload(ctx).replace('gamedistrict_', '');
     data.step = 'district';
     await advance(ctx, data);
   });
 
-  bot.action('gamedate_manual', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'gamedate_manual', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     await setState(ctx, GameOfferStates.GAME_DATE_MANUAL, data);
     await showCurrentMessage(ctx, TXT.game_offers.enter_date, {}, 'new');
   });
 
-  bot.action(/^gamedate_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamedate_/, async (ctx) => {
     const payload = getCallbackPayload(ctx);
     if (payload === 'gamedate_manual') return;
     const data = getStateData<OfferData>(ctx);
@@ -506,12 +522,10 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     await advance(ctx, data);
   });
 
-  bot.action(/^gametime_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gametime_/, async (ctx) => {
     const time = getCallbackPayload(ctx).replace('gametime_', '');
     if (!isValidTime(time)) {
-      await ctx.answerOnCallback({ notification: TXT.game_offers.invalid_time });
-      return;
+      return TXT.game_offers.invalid_time;
     }
     const data = getStateData<OfferData>(ctx);
     data.time = time;
@@ -519,40 +533,35 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     await advance(ctx, data);
   });
 
-  bot.action(/^gametype_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gametype_/, async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.game_type = decodeURIComponent(getCallbackPayload(ctx).replace('gametype_', ''));
     data.step = 'game_type';
     await advance(ctx, data);
   });
 
-  bot.action(/^paytype_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^paytype_/, async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.payment_type = decodeURIComponent(getCallbackPayload(ctx).replace('paytype_', ''));
     data.step = 'payment_type';
     await advance(ctx, data);
   });
 
-  bot.action('gamecomp_yes', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'gamecomp_yes', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.competitive = true;
     data.step = 'competitive';
     await advance(ctx, data, 'edit');
   });
 
-  bot.action('gamecomp_no', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'gamecomp_no', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.competitive = false;
     data.step = 'competitive';
     await advance(ctx, data, 'edit');
   });
 
-  bot.action(/^gamedatinggoal_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamedatinggoal_/, async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.dating_goal = decodeURIComponent(getCallbackPayload(ctx).replace('gamedatinggoal_', ''));
     data.dating_interests = [];
@@ -560,8 +569,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     await advance(ctx, data);
   });
 
-  bot.action(/^gamedatinginterest_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^gamedatinginterest_/, async (ctx) => {
     const interest = decodeURIComponent(getCallbackPayload(ctx).replace('gamedatinginterest_', ''));
     const data = getStateData<OfferData>(ctx);
     const list = data.dating_interests ?? [];
@@ -575,15 +583,13 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     await promptStep(ctx, data);
   });
 
-  bot.action('gamedatinginterests_done', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'gamedatinginterests_done', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     data.step = 'dating_interests';
     await advance(ctx, data);
   });
 
-  bot.action('my_offers', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'my_offers', async (ctx) => {
     const user = await requireRegistered(ctx);
     if (!user) return;
     const active = user.games.filter((g) => g.active);
@@ -596,14 +602,14 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
       }, 'edit');
       return;
     }
+    ctx.session.data = {};
     const data = getStateData<OfferData>(ctx);
     data.myOffers = active;
     data.myOfferIndex = 0;
     await showMyOffer(ctx, data);
   });
 
-  bot.action('offer_prev', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'offer_prev', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     if ((data.myOfferIndex ?? 0) > 0) {
       data.myOfferIndex = (data.myOfferIndex ?? 0) - 1;
@@ -611,8 +617,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     }
   });
 
-  bot.action('offer_next', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'offer_next', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     const offers = data.myOffers ?? [];
     if ((data.myOfferIndex ?? 0) < offers.length - 1) {
@@ -621,8 +626,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     }
   });
 
-  bot.action(/^delete_offer_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^delete_offer_/, async (ctx) => {
     const id = Number(getCallbackPayload(ctx).replace('delete_offer_', ''));
     await showCurrentMessage(ctx, fmt(TXT.game_offers.delete_confirm, { id }), {
       attachments: [Keyboard.inlineKeyboard([
@@ -631,14 +635,12 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     }, 'edit');
   });
 
-  bot.action('delete_no_single', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, 'delete_no_single', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     await showMyOffer(ctx, data);
   });
 
-  bot.action(/^delete_yes_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
+  onOfferAction(bot, /^delete_yes_/, async (ctx) => {
     const id = Number(getCallbackPayload(ctx).replace('delete_yes_', ''));
     const user = await requireRegistered(ctx);
     if (!user) return;

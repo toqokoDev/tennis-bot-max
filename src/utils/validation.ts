@@ -88,6 +88,28 @@ export function canCreateFreeOffer(user: {
   sport?: string;
 }): boolean {
   if (hasProSubscription(user)) return true;
-  if (user.gender === 'Женский' && (user.sport === '🍒Знакомства' || user.sport === '🍻По пиву')) return true;
+  // Reference: all women skip the free-offer paywall at the gate
+  if (user.gender === 'Женский') return true;
   return user.free_offers_used < 1;
+}
+
+export function parseRuDate(dateStr: string): Date | null {
+  if (!isValidDate(dateStr)) return null;
+  const [d, m, y] = dateStr.split('.').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+export function isFutureOrTodayDate(dateStr: string): boolean {
+  const date = parseRuDate(dateStr);
+  if (!date) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date >= today;
+}
+
+export function isDateRangeValid(startStr: string, endStr: string): boolean {
+  const start = parseRuDate(startStr);
+  const end = parseRuDate(endStr);
+  if (!start || !end) return false;
+  return end >= start;
 }

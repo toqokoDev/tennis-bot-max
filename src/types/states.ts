@@ -114,6 +114,11 @@ export enum PaymentStates {
   CONFIRM_PAYMENT = 'CONFIRM_PAYMENT',
 }
 
+export enum TournamentPaymentStates {
+  WAITING_EMAIL = 'TOURNAMENT_WAITING_EMAIL',
+  CONFIRM_PAYMENT = 'TOURNAMENT_CONFIRM_PAYMENT',
+}
+
 export enum AdminBroadcastStates {
   WAIT_FORWARD = 'WAIT_FORWARD',
   MANUAL_MEDIA = 'MANUAL_MEDIA',

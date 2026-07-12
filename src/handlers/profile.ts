@@ -42,23 +42,27 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
     const viewer = await requireRegistered(ctx);
     if (!viewer) return;
     const targetId = Number(getCallbackPayload(ctx).replace('profile_contact:', ''));
+    const backPayload = `partner_show_profile_${targetId}`;
     if (!hasProSubscription(viewer)) {
       await editButtons(ctx, TXT.profile.contact_pro, [
         Keyboard.inlineKeyboard([
-          [Keyboard.button.callback(TXT.common.back, `partner_show_profile_${targetId}`)],
+          [Keyboard.button.callback(TXT.common.back, backPayload)],
         ]),
       ]);
       return;
     }
     const target = await storage.getUser(targetId);
-    if (target) {
-      await editButtons(ctx, `📞 ${target.first_name}: ${target.phone}`, [
-        Keyboard.inlineKeyboard([
-          [Keyboard.button.callback(TXT.common.back, `partner_show_profile_${targetId}`)],
-        ]),
+    if (!target) {
+      await editButtons(ctx, TXT.profile.not_found, [
+        Keyboard.inlineKeyboard([[Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]]),
       ]);
       return;
     }
+    await editButtons(ctx, `📞 ${target.first_name}: ${target.phone}`, [
+      Keyboard.inlineKeyboard([
+        [Keyboard.button.callback(TXT.common.back, backPayload)],
+      ]),
+    ]);
   });
 
   bot.action(/^partner_show_profile_/, async (ctx) => {

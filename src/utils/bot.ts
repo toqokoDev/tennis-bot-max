@@ -5,6 +5,7 @@ import { getCtxUserId } from '../context.js';
 import { getPrevMessageId, setPrevMessageId, clearPrevMessageId } from '../middleware/session.js';
 import { calculateAge, getSportCategory, hasCourtPayment, hasVacation } from '../config/profile.js';
 import { saveProfileViewContext } from './gameHistory.js';
+import { fullName } from './gameResult.js';
 import { env, isAdmin } from '../config/env.js';
 import { TXT, fmt, MENU_LABELS } from '../texts.js';
 import type { UserProfile } from '../types/models.js';
@@ -48,6 +49,66 @@ export function chunkButtons<T>(
 /** Новое сообщение — запрос текстового ввода (вне регистрации и FSM) */
 export async function askText(ctx: AppContext, text: string, extra?: ReplyExtra): Promise<void> {
   await ctx.reply(text, extra);
+}
+
+/** Убрать inline-кнопки у якорного сообщения (после текстового ввода пользователя) */
+export async function clearPrevMessageButtons(ctx: AppContext): Promise<void> {
+  const targetId = getPrevMessageId(ctx);
+  if (!targetId) return;
+  try {
+    const msg = await ctx.getMessage(targetId);
+    await ctx.api.editMessage(targetId, {
+      text: msg.body.text ?? '',
+      format: 'html',
+      attachments: [],
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Новое сообщение после ввода пользователя — у предыдущего убираются кнопки */
+export async function replyText(ctx: AppContext, text: string, extra?: ReplyExtra): Promise<string> {
+  await clearPrevMessageButtons(ctx);
+  const msg = await ctx.reply(text, {
+    format: extra?.format ?? 'html',
+    ...extra,
+  });
+  const mid = msg.body.mid;
+  await setPrevMessageId(ctx, mid);
+  return mid;
+}
+
+/** Новое сообщение с кнопками после ввода пользователя */
+export async function replyButtons(
+  ctx: AppContext,
+  text: string,
+  attachments: AttachmentRequest[],
+  extra?: Omit<ReplyExtra, 'attachments'>,
+): Promise<string> {
+  await clearPrevMessageButtons(ctx);
+  return askButtons(ctx, text, attachments, extra);
+}
+
+/** Callback — редактировать; текстовый ввод — новое сообщение */
+export async function promptText(ctx: AppContext, text: string, extra?: ReplyExtra): Promise<string> {
+  if (ctx.callback) {
+    return editText(ctx, text, extra);
+  }
+  return replyText(ctx, text, extra);
+}
+
+/** Callback — редактировать; текстовый ввод — новое сообщение */
+export async function promptButtons(
+  ctx: AppContext,
+  text: string,
+  attachments: AttachmentRequest[],
+  extra?: Omit<ReplyExtra, 'attachments'>,
+): Promise<string> {
+  if (ctx.callback) {
+    return editButtons(ctx, text, attachments, extra);
+  }
+  return replyButtons(ctx, text, attachments, extra);
 }
 
 /** Новое сообщение — шаг с inline-кнопками (после текстового ввода) */
@@ -141,12 +202,11 @@ function formatPaymentLabel(payment: string): string {
 }
 
 export function formatProfileText(profile: UserProfile): string {
-  const age = calculateAge(profile.birth_date);
-  const lines = [
-    `👤 ${profile.first_name} ${profile.last_name}`,
-    `🎂 Возраст: ${formatAgeYears(age)}`,
-    '',
-  ];
+  const lines = [`👤 ${fullName(profile)}`];
+  if (profile.birth_date) {
+    lines.push(`🎂 Возраст: ${formatAgeYears(calculateAge(profile.birth_date))}`);
+  }
+  lines.push('');
 
   if (getSportCategory(profile.sport) === 'court_sport') {
     lines.push(`🔎 Роль: ${profile.role}`);
@@ -164,11 +224,18 @@ export function formatProfileText(profile: UserProfile): string {
     `🏙 Город: ${profile.city}${profile.district ? `, ${profile.district}` : ''}`,
     `🗂 Вид спорта: ${profile.sport}`,
     `👫 Пол: ${profile.gender}`,
-    '',
-    '📊 Статистика игр:',
-    `• Сыграно: ${profile.games_played}`,
-    `• Побед: ${profile.games_wins}`,
   );
+
+  if (getSportCategory(profile.sport) === 'court_sport') {
+    lines.push(
+      '',
+      '📊 Статистика игр:',
+      `• Сыграно: ${profile.games_played}`,
+      `• Побед: ${profile.games_wins}`,
+    );
+  } else {
+    lines.push('');
+  }
 
   if (profile.default_payment && hasCourtPayment(profile.sport)) {
     lines.push('', `💳 Оплата корта: ${formatPaymentLabel(profile.default_payment)}`);
@@ -196,21 +263,25 @@ export function profileKeyboard(
   if (isOwn) {
     buttons.push([Keyboard.button.callback(TXT.profile.edit, 'edit_profile')]);
     if (hasVacation(profile.sport)) {
-      buttons.push([Keyboard.button.callback(TXT.profile.vacation_partner, 'createTour')]);
+      buttons.push([Keyboard.button.callback(TXT.profile.vacation_partner, 'create_tour')]);
     }
     buttons.push([
       Keyboard.button.callback(TXT.profile.my_offers, 'my_offers'),
       Keyboard.button.callback(TXT.profile.new_offer, 'new_offer'),
     ]);
-    buttons.push([Keyboard.button.callback(TXT.profile.game_history, `game_history:${profile.max_user_id}`)]);
+    if (getSportCategory(profile.sport) === 'court_sport') {
+      buttons.push([Keyboard.button.callback(TXT.profile.game_history, `game_history:${profile.max_user_id}`)]);
+    }
     buttons.push([Keyboard.button.callback(TXT.profile.delete, '1delete_profile')]);
   } else {
     buttons.push([
       Keyboard.button.callback(TXT.profile.contact, `profile_contact:${profile.max_user_id}`),
     ]);
-    buttons.push([
-      Keyboard.button.callback(TXT.profile.game_history, `game_history:${profile.max_user_id}`),
-    ]);
+    if (getSportCategory(profile.sport) === 'court_sport') {
+      buttons.push([
+        Keyboard.button.callback(TXT.profile.game_history, `game_history:${profile.max_user_id}`),
+      ]);
+    }
   }
 
   if (viewerId && isAdmin(viewerId)) {
@@ -254,7 +325,7 @@ export async function showMainMenu(ctx: AppContext): Promise<void> {
 
 export function formatStartWelcome(profile: UserProfile): string {
   return fmt(TXT.start.registered_welcome, {
-    name: `${profile.first_name} ${profile.last_name}`,
+    name: fullName(profile),
     rating: profile.rating_points,
     games: profile.games_played,
     wins: profile.games_wins,

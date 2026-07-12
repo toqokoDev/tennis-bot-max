@@ -1,11 +1,15 @@
-import { TXT, fmt, MENU_LABELS } from '../texts.js';
+import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
-import { getCtxUserId } from '../context.js';
+import { getCtxUserId, getMessageText } from '../context.js';
 import { isAdmin } from '../config/env.js';
 import { storage } from '../storage/jsonStorage.js';
-import { beginCommandResponse, showCurrentMessage } from '../utils/bot.js';
+import { clearState, getState, getStateData, setState } from '../middleware/session.js';
+import { AdminBroadcastStates } from '../types/states.js';
+import { beginCommandResponse, showCurrentMessage, askText, backButton } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
+
+type BroadcastData = { text?: string };
 
 export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
   bot.command('admin', async (ctx) => {
@@ -37,6 +41,42 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     await ctx.reply(fmt(TXT.admin.users_count, { count: Object.keys(users).length }));
   });
 
+  bot.action('admin_broadcast', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    if (!isAdmin(getCtxUserId(ctx))) return;
+    await setState(ctx, AdminBroadcastStates.MANUAL_TEXT, {});
+    await askText(ctx, TXT.admin.broadcast_prompt);
+  });
+
+  bot.action('admin_broadcast_confirm', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    if (!isAdmin(getCtxUserId(ctx))) return;
+    const data = getStateData<BroadcastData>(ctx);
+    if (!data.text) {
+      await ctx.reply(TXT.admin.broadcast_empty, { attachments: [backButton()] });
+      return;
+    }
+    const ids = await storage.listAllUserIds();
+    let sent = 0;
+    for (const id of ids) {
+      try {
+        await ctx.api.sendMessageToUser(id, data.text);
+        sent += 1;
+      } catch {
+        /* skip */
+      }
+    }
+    await clearState(ctx);
+    await ctx.reply(fmt(TXT.admin.broadcast_done, { count: sent }), { attachments: [backButton()] });
+  });
+
+  bot.action('admin_broadcast_cancel', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    if (!isAdmin(getCtxUserId(ctx))) return;
+    await clearState(ctx);
+    await showAdminMenu(ctx);
+  });
+
   bot.action(/^admin_ban_user:/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     if (!isAdmin(getCtxUserId(ctx))) return;
@@ -66,6 +106,25 @@ async function showAdminMenu(ctx: AppContext): Promise<void> {
 
 export async function handleAdminBroadcast(ctx: AppContext, text: string): Promise<boolean> {
   if (!isAdmin(getCtxUserId(ctx))) return false;
+
+  const state = getState(ctx);
+  if (state === AdminBroadcastStates.MANUAL_TEXT) {
+    const message = getMessageText(ctx) || text;
+    if (!message) {
+      await askText(ctx, TXT.admin.broadcast_prompt);
+      return true;
+    }
+    await setState(ctx, AdminBroadcastStates.CONFIRM, { text: message });
+    await showCurrentMessage(ctx, fmt(TXT.admin.broadcast_confirm, { text: message }), {
+      attachments: [Keyboard.inlineKeyboard([
+        [Keyboard.button.callback(TXT.common.yes, 'admin_broadcast_confirm')],
+        [Keyboard.button.callback(TXT.common.no, 'admin_broadcast_cancel')],
+      ])],
+    }, 'new');
+    return true;
+  }
+
+  // Legacy shortcut
   if (text !== '/broadcast_confirm') return false;
   beginCommandResponse(ctx);
   const ids = await storage.listAllUserIds();

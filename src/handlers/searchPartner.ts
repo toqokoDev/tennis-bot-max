@@ -103,11 +103,12 @@ function filterUsers(
 
     const searchSport = data.sport;
     if (searchSport === DATING_SPORT || searchSport === '🍻По пиву' || searchSport === '☕️Бизнес-завтрак') {
-      // no role check
+      // no role check for dating/meeting sports
     } else if (searchSport) {
       if (getSportFieldConfig(searchSport).hasRole && profile.role !== '🎯 Игрок') continue;
-    } else if (!['🍒Знакомства', '🍻По пиву', '☕️Бизнес-завтрак'].includes(profile.sport)) {
-      if (getSportFieldConfig(profile.sport).hasRole && profile.role !== '🎯 Игрок') continue;
+    } else if (profile.role !== '🎯 Игрок') {
+      // "all sports" search: only players (parity with TennisBot)
+      continue;
     }
 
     if (data.country && profile.country !== data.country) continue;
