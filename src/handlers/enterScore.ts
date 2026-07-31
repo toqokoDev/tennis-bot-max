@@ -557,7 +557,7 @@ async function saveConfirmedScore(ctx: AppContext): Promise<void> {
     await storage.saveUser(profile);
   }
 
-  await sendGameNotificationToChannel(ctx.api, user.sport, data.sets.join(', '));
+  await sendGameNotificationToChannel(ctx.api, game, profilesToMap(outcome.profiles));
   const summary = data.result_summary ?? outcome.summary;
   await clearState(ctx);
   await showSavedResult(ctx, summary, data);

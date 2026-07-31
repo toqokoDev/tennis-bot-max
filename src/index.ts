@@ -17,6 +17,7 @@ import { handlePaymentMessage } from './handlers/payments.js';
 import { handleTournamentPaymentMessage } from './handlers/tournament.js';
 import { handleAdminBroadcast } from './handlers/admin.js';
 import { startBackgroundJobs, stopBackgroundJobs } from './jobs/tournamentJobs.js';
+import { clearWebhookSubscriptions } from './utils/clearWebhooks.js';
 
 async function main(): Promise<void> {
   if (!env.BOT_TOKEN) {
@@ -25,6 +26,9 @@ async function main(): Promise<void> {
   }
 
   await storage.init();
+
+  logger.info('Clearing old webhook subscriptions...');
+  await clearWebhookSubscriptions(env.BOT_TOKEN);
 
   const bot = new Bot<AppContext>(env.BOT_TOKEN, { contextType: AppContext });
 
@@ -48,7 +52,9 @@ async function main(): Promise<void> {
   });
 
   bot.catch((err, ctx) => {
-    logger.error('Bot error', { err, updateType: ctx.updateType });
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    logger.error(`Bot error (${ctx.updateType}): ${message}`, stack ?? err);
   });
 
   startBackgroundJobs(bot);

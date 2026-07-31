@@ -46,7 +46,9 @@ export async function handleStartPayload(ctx: AppContext, payload?: string | nul
   if (payload?.startsWith('join_tournament_')) {
     if (existing) {
       const { handleJoinTournament } = await import('./tournament.js');
-      await handleJoinTournament(ctx, payload.replace('join_tournament_', ''));
+      await handleJoinTournament(ctx, payload.replace('join_tournament_', ''), {
+        fromDeepLink: true,
+      });
       return;
     }
   }

@@ -16,7 +16,7 @@ import {
   generateTournamentName,
 } from '../config/tournament.js';
 import { storage } from '../storage/jsonStorage.js';
-import { clearState, getState, getStateData, setState } from '../middleware/session.js';
+import { clearState, getState, getStateData, setState, getPrevMessageId, setPrevMessageId } from '../middleware/session.js';
 import {
   CreateTournamentStates,
   TournamentPaymentStates,
@@ -32,17 +32,21 @@ import {
   shouldOpenPaymentWindow,
   startTournament,
 } from '../utils/tournamentLifecycle.js';
-import { bracketToText } from '../utils/bracket/index.js';
 import {
   sendTournamentApplicationToChannel,
   sendTournamentCreatedToChannel,
 } from '../services/channels.js';
 import { createTournamentPayment, checkTinkoffPaymentStatus } from '../services/payments.js';
+import { uploadBracketImage } from '../services/bracketImage.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 import { isValidEmail } from '../utils/validation.js';
 
-type ViewData = Partial<Tournament> & { page?: number };
+type ViewData = Partial<Tournament> & {
+  page?: number;
+  listMode?: 'browse' | 'my';
+  tournamentIds?: string[];
+};
 type CreateData = Partial<Tournament>;
 type TourPayData = {
   tournament_id?: string;
@@ -51,6 +55,41 @@ type TourPayData = {
   payment_id?: string;
   payment_url?: string;
 };
+
+type CardNav = {
+  page: number;
+  total: number;
+  listMode: 'browse' | 'my';
+};
+
+type CardShowOptions = {
+  mode?: 'new' | 'edit';
+  /** If false, do not regenerate/upload bracket image (safer for editMessage). */
+  withImage?: boolean;
+};
+
+function filterBrowseTournaments(all: Record<string, Tournament>, data: ViewData): Tournament[] {
+  return Object.values(all)
+    .filter((t) => {
+      if (!t.show_in_list || t.status === 'cancelled') return false;
+      if (data.sport && t.sport !== data.sport) return false;
+      if (data.country && t.country !== data.country) return false;
+      if (data.city && t.city !== data.city) return false;
+      return true;
+    })
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+async function resolveTournamentList(ctx: AppContext, data: ViewData): Promise<Tournament[]> {
+  const all = await storage.getTournaments();
+  if (data.listMode === 'my') {
+    const userId = getCtxUserId(ctx);
+    return Object.values(all)
+      .filter((t) => t.participants[String(userId)] && t.status !== 'cancelled')
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  return filterBrowseTournaments(all, data);
+}
 
 export async function showTournamentMenu(ctx: AppContext): Promise<void> {
   const user = await requireRegistered(ctx);
@@ -68,31 +107,34 @@ export async function showTournamentMenu(ctx: AppContext): Promise<void> {
   });
 }
 
-async function showMyTournaments(ctx: AppContext): Promise<void> {
+async function showMyTournaments(
+  ctx: AppContext,
+  page = 0,
+  opts: CardShowOptions = { mode: 'edit', withImage: true },
+): Promise<void> {
   const user = await requireRegistered(ctx);
   if (!user) return;
-  const all = await storage.getTournaments();
-  const list = Object.values(all).filter(
-    (t) => t.participants[String(user.max_user_id)] && t.status !== 'cancelled',
-  );
+  const list = await resolveTournamentList(ctx, { listMode: 'my' });
   if (!list.length) {
     await showCurrentMessage(ctx, TXT.tournament.my_empty, {
       attachments: [Keyboard.inlineKeyboard([
         [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
         [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
       ])],
-    });
+    }, opts.mode ?? 'edit');
     return;
   }
-  const buttons = list.map((t) => {
-    const paid = t.payments[String(user.max_user_id)]?.status === 'succeeded';
-    const mark = paid ? '✅ ' : (t.entry_fee > 0 ? '💳 ' : '');
-    return [Keyboard.button.callback(`${mark}${t.name}`, `view_tournament:${t.id}`)];
+  const safePage = ((page % list.length) + list.length) % list.length;
+  await setState(ctx, ViewTournamentsStates.LIST, {
+    listMode: 'my',
+    page: safePage,
+    tournamentIds: list.map((t) => t.id),
   });
-  buttons.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
-  await showCurrentMessage(ctx, TXT.tournament.my, {
-    attachments: [Keyboard.inlineKeyboard(buttons)],
-  });
+  await showTournamentCard(ctx, list[safePage], {
+    page: safePage,
+    total: list.length,
+    listMode: 'my',
+  }, opts);
 }
 
 export async function handleViewTournament(ctx: AppContext, id: string): Promise<void> {
@@ -101,24 +143,72 @@ export async function handleViewTournament(ctx: AppContext, id: string): Promise
     await ctx.reply(TXT.tournament.not_found);
     return;
   }
+  const data = getStateData<ViewData>(ctx);
+  const list = data.tournamentIds?.length
+    ? (await Promise.all(data.tournamentIds.map((tid) => storage.getTournament(tid)))).filter(
+      (t): t is Tournament => Boolean(t),
+    )
+    : await resolveTournamentList(ctx, data);
+  const page = list.findIndex((t) => t.id === id);
+  if (page >= 0 && list.length > 0) {
+    await showTournamentCard(ctx, tourn, {
+      page,
+      total: list.length,
+      listMode: data.listMode ?? 'browse',
+    });
+    return;
+  }
   await showTournamentCard(ctx, tourn);
 }
 
-export async function handleJoinTournament(ctx: AppContext, id: string): Promise<void> {
+export async function handleJoinTournament(
+  ctx: AppContext,
+  id: string,
+  opts: { fromDeepLink?: boolean } = {},
+): Promise<void> {
+  const fromDeepLink = Boolean(opts.fromDeepLink);
   const user = await requireRegistered(ctx);
-  if (!user) return;
+  if (!user) {
+    if (!fromDeepLink && ctx.callback) {
+      await ctx.answerOnCallback({ notification: TXT.common.not_registered }).catch(() => undefined);
+    }
+    return;
+  }
   let tourn = await storage.getTournament(id);
   if (!tourn || tourn.status !== 'active') {
-    await ctx.reply(TXT.tournament.unavailable);
+    if (fromDeepLink || !ctx.callback) {
+      await ctx.reply(TXT.tournament.unavailable);
+    } else {
+      await ctx.answerOnCallback({ notification: TXT.tournament.unavailable });
+    }
     return;
   }
   tourn = addParticipant(tourn, user.max_user_id, `${user.first_name} ${user.last_name}`);
   if (shouldOpenPaymentWindow(tourn)) tourn = openPaymentWindow(tourn);
   if (canStartTournament(tourn)) tourn = startTournament(tourn);
   await storage.saveTournament(tourn);
-  await sendTournamentApplicationToChannel(ctx.api, tourn, user.first_name);
-  await ctx.reply(TXT.tournament.joined);
-  await showTournamentCard(ctx, tourn);
+  await sendTournamentApplicationToChannel(ctx.api, tourn, user);
+
+  const data = getStateData<ViewData>(ctx);
+  const list = await resolveTournamentList(ctx, { ...data, listMode: data.listMode ?? 'browse' });
+  const page = Math.max(0, list.findIndex((t) => t.id === tourn.id));
+  const nav: CardNav | undefined = list.length
+    ? {
+      page: page >= 0 ? page : 0,
+      total: list.length,
+      listMode: data.listMode ?? 'browse',
+    }
+    : undefined;
+  const cardTourn = list.length ? (list[page] ?? tourn) : tourn;
+
+  if (fromDeepLink || !ctx.callback) {
+    await ctx.reply(TXT.tournament.joined);
+    await showTournamentCard(ctx, cardTourn, nav, { mode: 'new', withImage: true });
+    return;
+  }
+
+  await ctx.answerOnCallback({ notification: TXT.tournament.joined });
+  await showTournamentCard(ctx, cardTourn, nav, { mode: 'edit', withImage: true });
 }
 
 export async function handlePayTournament(ctx: AppContext, id: string): Promise<void> {
@@ -225,9 +315,17 @@ async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): 
   await showTournamentCard(ctx, tourn);
 }
 
-async function showTournamentCard(ctx: AppContext, tourn: Tournament): Promise<void> {
+async function showTournamentCard(
+  ctx: AppContext,
+  tourn: Tournament,
+  nav?: CardNav,
+  opts: CardShowOptions = {},
+): Promise<void> {
+  const mode = opts.mode ?? 'edit';
+  const withImage = opts.withImage ?? mode === 'new';
+
   const count = Object.keys(tourn.participants).length;
-  const text = fmt(TXT.tournament.card, {
+  let text = fmt(TXT.tournament.card, {
     name: tourn.name,
     sport: tourn.sport,
     city: tourn.city,
@@ -239,8 +337,30 @@ async function showTournamentCard(ctx: AppContext, tourn: Tournament): Promise<v
   });
   const userId = getCtxUserId(ctx);
   const isParticipant = Boolean(tourn.participants[String(userId)]);
+  if (isParticipant) {
+    text += `\n${TXT.tournament.you_registered}`;
+  }
+  if (nav && nav.total > 1) {
+    text = fmt(TXT.tournament.card_page, {
+      page: nav.page + 1,
+      total: nav.total,
+      card: text,
+    });
+  }
+
   const paid = tourn.payments[String(userId)]?.status === 'succeeded';
   const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
+
+  if (nav && nav.total > 1) {
+    const prefix = nav.listMode === 'my' ? 'tmy_page' : 'tview_page';
+    const prev = (nav.page - 1 + nav.total) % nav.total;
+    const next = (nav.page + 1) % nav.total;
+    buttons.push([
+      Keyboard.button.callback(TXT.tournament.prev, `${prefix}:${prev}`),
+      Keyboard.button.callback(TXT.tournament.next, `${prefix}:${next}`),
+    ]);
+  }
+
   if (tourn.status === 'active' && !isParticipant) {
     buttons.push([Keyboard.button.callback(TXT.tournament.join, `join_tournament:${tourn.id}`)]);
   }
@@ -250,37 +370,82 @@ async function showTournamentCard(ctx: AppContext, tourn: Tournament): Promise<v
       buttons.push([Keyboard.button.callback(TXT.tournament.pay, `pay_tournament:${tourn.id}`)]);
     }
   }
-  if (tourn.status === 'started' && tourn.bracket) {
+  if (tourn.status === 'started' && (tourn.bracket || tourn.round_robin) && !tourn.hide_bracket) {
     buttons.push([Keyboard.button.callback(TXT.tournament.bracket, `view_bracket:${tourn.id}`)]);
   }
-  buttons.push([Keyboard.button.callback(TXT.tournament.my, 'tournament_my')]);
+  if (nav?.listMode !== 'my') {
+    buttons.push([Keyboard.button.callback(TXT.tournament.my, 'tournament_my')]);
+  } else {
+    buttons.push([Keyboard.button.callback(TXT.tournament.list, 'tournament_list')]);
+  }
   buttons.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
-  await showCurrentMessage(ctx, text, { attachments: [Keyboard.inlineKeyboard(buttons)] });
+
+  const keyboard = Keyboard.inlineKeyboard(buttons);
+  let bracketImage: import('@maxhub/max-bot-api/types').AttachmentRequest | null = null;
+  if (withImage) {
+    try {
+      bracketImage = await uploadBracketImage(ctx.api, tourn);
+    } catch {
+      /* keep card without image */
+    }
+  }
+
+  const attachments = bracketImage ? [bracketImage, keyboard] : [keyboard];
+  if (mode === 'new') {
+    try {
+      await showCurrentMessage(ctx, text, { attachments }, 'new');
+    } catch {
+      await showCurrentMessage(ctx, text, { attachments: [keyboard] }, 'new');
+    }
+    return;
+  }
+
+  // Edit in place — do not fall back to a new message
+  const targetId = (ctx.callback && ctx.messageId) ? ctx.messageId : getPrevMessageId(ctx);
+  if (!targetId) {
+    await showCurrentMessage(ctx, text, { attachments }, 'new');
+    return;
+  }
+  const body = { text, format: 'html' as const, attachments };
+  try {
+    await ctx.api.editMessage(targetId, body);
+    await setPrevMessageId(ctx, targetId);
+  } catch {
+    try {
+      await ctx.api.editMessage(targetId, { text, format: 'html', attachments: [keyboard] });
+      await setPrevMessageId(ctx, targetId);
+    } catch {
+      /* keep existing message if edit is impossible */
+    }
+  }
 }
 
-async function showTournamentList(ctx: AppContext, data: ViewData): Promise<void> {
-  const all = await storage.getTournaments();
-  const list = Object.values(all).filter((t) => {
-    if (!t.show_in_list || t.status === 'cancelled') return false;
-    if (data.sport && t.sport !== data.sport) return false;
-    if (data.country && t.country !== data.country) return false;
-    if (data.city && t.city !== data.city) return false;
-    return true;
-  });
+async function showTournamentList(
+  ctx: AppContext,
+  data: ViewData,
+  opts: CardShowOptions = { mode: 'edit', withImage: true },
+): Promise<void> {
+  const list = filterBrowseTournaments(await storage.getTournaments(), data);
   if (!list.length) {
     await showCurrentMessage(ctx, TXT.tournament.no_list, {
       attachments: [Keyboard.inlineKeyboard([
         [Keyboard.button.callback(TXT.common.back, 'tournament_list')],
         [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
       ])],
-    });
+    }, opts.mode ?? 'edit');
     return;
   }
-  const buttons = list.map((t) => [Keyboard.button.callback(t.name, `view_tournament:${t.id}`)]);
-  buttons.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
-  await showCurrentMessage(ctx, TXT.tournament.list, {
-    attachments: [Keyboard.inlineKeyboard(buttons)],
-  });
+  const page = data.page ?? 0;
+  const safePage = ((page % list.length) + list.length) % list.length;
+  data.listMode = 'browse';
+  data.page = safePage;
+  data.tournamentIds = list.map((t) => t.id);
+  await setState(ctx, ViewTournamentsStates.LIST, data);
+  await showTournamentCard(ctx, list[safePage], {
+    page: safePage,
+    total: list.length,
+    listMode: 'browse',
+  }, opts);
 }
 
 async function finalizeTournamentCreate(ctx: AppContext, data: CreateData): Promise<void> {
@@ -325,7 +490,7 @@ async function finalizeTournamentCreate(ctx: AppContext, data: CreateData): Prom
   await storage.saveTournament(tourn);
   await sendTournamentCreatedToChannel(ctx.api, tourn);
   await clearState(ctx);
-  await ctx.reply(`✅ ${tourn.name}`);
+  await ctx.reply(fmt(TXT.tournament.create_done, { name: tourn.name }));
 }
 
 export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
@@ -341,7 +506,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
 
   bot.action('tournament_my', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    await showMyTournaments(ctx);
+    await showMyTournaments(ctx, 0);
   });
 
   bot.action(/^tviewsport_/, async (ctx) => {
@@ -373,8 +538,25 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<ViewData>(ctx);
     data.city = decodeURIComponent(getCallbackPayload(ctx).replace('tviewcity_', ''));
+    data.page = 0;
+    data.listMode = 'browse';
     await setState(ctx, ViewTournamentsStates.LIST, data);
     await showTournamentList(ctx, data);
+  });
+
+  bot.action(/^tview_page:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const page = Number.parseInt(getCallbackPayload(ctx).replace('tview_page:', ''), 10) || 0;
+    const data = getStateData<ViewData>(ctx);
+    data.page = page;
+    data.listMode = 'browse';
+    await showTournamentList(ctx, data, { mode: 'edit', withImage: false });
+  });
+
+  bot.action(/^tmy_page:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const page = Number.parseInt(getCallbackPayload(ctx).replace('tmy_page:', ''), 10) || 0;
+    await showMyTournaments(ctx, page, { mode: 'edit', withImage: false });
   });
 
   bot.action(/^view_tournament:/, async (ctx) => {
@@ -384,12 +566,12 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
   });
 
   bot.action(/^join_tournament:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    await handleJoinTournament(ctx, getCallbackPayload(ctx).replace('join_tournament:', ''));
+    await handleJoinTournament(ctx, getCallbackPayload(ctx).replace('join_tournament:', ''), {
+      fromDeepLink: false,
+    });
   });
 
   bot.action(/^leave_tournament:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
     const id = getCallbackPayload(ctx).replace('leave_tournament:', '');
     const userId = getCtxUserId(ctx);
     let tourn = await storage.getTournament(id);
@@ -397,7 +579,49 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
       tourn = removeParticipant(tourn, userId);
       await storage.saveTournament(tourn);
     }
-    await ctx.reply(TXT.tournament.left);
+    await ctx.answerOnCallback({ notification: TXT.tournament.left });
+
+    const data = getStateData<ViewData>(ctx);
+    const editOpts: CardShowOptions = { mode: 'edit', withImage: false };
+
+    if (data.listMode === 'my') {
+      const list = await resolveTournamentList(ctx, { listMode: 'my' });
+      if (!list.length) {
+        await showCurrentMessage(ctx, TXT.tournament.my_empty, {
+          attachments: [Keyboard.inlineKeyboard([
+            [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
+            [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+          ])],
+        }, 'edit');
+        return;
+      }
+      const page = Math.min(data.page ?? 0, list.length - 1);
+      await setState(ctx, ViewTournamentsStates.LIST, {
+        listMode: 'my',
+        page,
+        tournamentIds: list.map((t) => t.id),
+      });
+      await showTournamentCard(ctx, list[page], {
+        page,
+        total: list.length,
+        listMode: 'my',
+      }, editOpts);
+      return;
+    }
+
+    if (tourn) {
+      const list = await resolveTournamentList(ctx, { ...data, listMode: 'browse' });
+      const page = Math.max(0, list.findIndex((t) => t.id === id));
+      if (list.length) {
+        await showTournamentCard(ctx, list[page], {
+          page,
+          total: list.length,
+          listMode: 'browse',
+        }, editOpts);
+      } else {
+        await showTournamentCard(ctx, tourn, undefined, editOpts);
+      }
+    }
   });
 
   bot.action(/^pay_tournament:/, async (ctx) => {
@@ -415,9 +639,15 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: 'OK' });
     const id = getCallbackPayload(ctx).replace('view_bracket:', '');
     const tourn = await storage.getTournament(id);
-    if (tourn?.bracket) {
-      const text = bracketToText(tourn.bracket as unknown as import('../utils/bracket/index.js').BracketTree);
-      await ctx.reply(text);
+    if (!tourn) {
+      await ctx.reply(TXT.tournament.not_found);
+      return;
+    }
+    const bracketImage = await uploadBracketImage(ctx.api, tourn);
+    if (bracketImage) {
+      await ctx.reply(TXT.tournament.bracket, { attachments: [bracketImage] });
+    } else {
+      await ctx.reply(TXT.tournament.bracket_unavailable);
     }
   });
 
@@ -462,7 +692,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     const data = getStateData<CreateData>(ctx);
     data.city = decodeURIComponent(getCallbackPayload(ctx).replace('tccity_', ''));
     await setState(ctx, CreateTournamentStates.TYPE, data);
-    await showCurrentMessage(ctx, 'Тип:', {
+    await showCurrentMessage(ctx, TXT.tournament.create_type, {
       attachments: [Keyboard.inlineKeyboard(
         TOURNAMENT_TYPES.map((tp) => [Keyboard.button.callback(tp, `tctype_${encodeURIComponent(tp)}`)]),
       )],
@@ -474,7 +704,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     const data = getStateData<CreateData>(ctx);
     data.type = decodeURIComponent(getCallbackPayload(ctx).replace('tctype_', '')) as Tournament['type'];
     await setState(ctx, CreateTournamentStates.GENDER, data);
-    await showCurrentMessage(ctx, 'Пол:', {
+    await showCurrentMessage(ctx, TXT.tournament.create_gender, {
       attachments: [Keyboard.inlineKeyboard(
         TOURNAMENT_GENDERS.map((g) => [Keyboard.button.callback(g, `tcgender_${encodeURIComponent(g)}`)]),
       )],
@@ -486,7 +716,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     const data = getStateData<CreateData>(ctx);
     data.gender = decodeURIComponent(getCallbackPayload(ctx).replace('tcgender_', ''));
     await setState(ctx, CreateTournamentStates.CATEGORY, data);
-    await showCurrentMessage(ctx, 'Категория:', {
+    await showCurrentMessage(ctx, TXT.tournament.create_category, {
       attachments: [Keyboard.inlineKeyboard(
         TOURNAMENT_CATEGORIES.map((c) => [Keyboard.button.callback(c, `tccategory_${encodeURIComponent(c)}`)]),
       )],
@@ -504,10 +734,10 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
       data.type,
       data.gender,
       data.category,
-      `Взнос: ${env.TOURNAMENT_ENTRY_FEE} ₽`,
-      'Участников: 8',
+      fmt(TXT.tournament.create_fee, { fee: env.TOURNAMENT_ENTRY_FEE }),
+      TXT.tournament.create_participants,
     ].join('\n');
-    await showCurrentMessage(ctx, `Подтвердите создание турнира:\n\n${preview}`, {
+    await showCurrentMessage(ctx, fmt(TXT.tournament.create_confirm, { preview }), {
       attachments: [Keyboard.inlineKeyboard([
         [Keyboard.button.callback('✅ Создать', 'tcconfirm_yes')],
         [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
