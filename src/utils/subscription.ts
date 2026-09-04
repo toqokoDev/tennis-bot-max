@@ -5,25 +5,17 @@ export type ProLockFeature =
   | 'contacts'
   | 'all_players'
   | 'enter_score'
-  | 'game_history'
-  | 'game_offers';
+  | 'game_history';
 
 /** Сообщение «доступ закрыт» в стиле TennisBot (Telegram). */
 export function formatProLockedMessage(feature: ProLockFeature, userId: number): string {
   const referralLink = getDeepLink(`ref_${userId}`);
   const featureLine = TXT.subscription_lock.features[feature];
-  const lines: string[] = [
+  return [
     TXT.subscription_lock.title,
     '',
-  ];
-
-  if (feature === 'game_offers') {
-    lines.push(TXT.subscription_lock.free_offers_limit, '', featureLine, '');
-  } else {
-    lines.push(featureLine, '');
-  }
-
-  lines.push(
+    featureLine,
+    '',
     fmt(TXT.subscription_lock.price, { price: env.SUBSCRIPTION_PRICE }),
     TXT.subscription_lock.go_to_payments,
     '',
@@ -32,7 +24,5 @@ export function formatProLockedMessage(feature: ProLockFeature, userId: number):
     `${TXT.subscription_lock.invite_link} <code>${referralLink}</code>`,
     '',
     TXT.subscription_lock.invite_stats,
-  );
-
-  return lines.join('\n');
+  ].join('\n');
 }

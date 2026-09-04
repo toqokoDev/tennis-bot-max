@@ -83,7 +83,7 @@ function formatOfferDetail(user: UserProfile, offer: GameOffer, viewerId: number
   const cat = getSportCategory(offer.sport);
   const lines = [
     `<b>${offer.sport}</b>`,
-    `👤 ${user.first_name} ${user.last_name}${user.username ? ` @${user.username}` : ''}`,
+    `👤 ${user.first_name} ${user.last_name}`,
   ];
 
   if (cat === 'court_sport') {

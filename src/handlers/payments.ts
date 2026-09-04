@@ -12,6 +12,7 @@ import { createSubscriptionPayment, checkPaymentStatus } from '../services/payme
 import { notifySubscriptionPurchase } from '../services/email.js';
 import { requireRegistered } from './registration.js';
 import type { UserProfile } from '../types/models.js';
+import { logger } from '../logger.js';
 
 type PayData = {
   email?: string;
@@ -108,7 +109,15 @@ export async function handlePaymentMessage(ctx: AppContext): Promise<boolean> {
   if (!user) return true;
 
   const email = text.trim();
-  const payment = await createSubscriptionPayment({ userId: user.max_user_id, email });
+  let payment;
+  try {
+    payment = await createSubscriptionPayment({ userId: user.max_user_id, email });
+  } catch (err) {
+    logger.error('createSubscriptionPayment failed', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    payment = null;
+  }
   if (!payment) {
     await clearState(ctx);
     await ctx.reply(TXT.payments.create_error, { attachments: [backButton()] });

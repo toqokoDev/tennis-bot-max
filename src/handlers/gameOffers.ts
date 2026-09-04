@@ -15,7 +15,7 @@ import {
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { GameOfferStates } from '../types/states.js';
-import type { GameOffer, SportType, UserProfile } from '../types/models.js';
+import type { GameOffer, SportType } from '../types/models.js';
 import { backButton, chunkButtons, showCurrentMessage } from '../utils/bot.js';
 import {
   buildOfferDateButtons,
@@ -27,8 +27,7 @@ import {
   stepToState,
   type GameStep,
 } from '../utils/game.js';
-import { canCreateFreeOffer, hasProSubscription, isValidShortDate, isValidTime, parseOfferDateTime } from '../utils/validation.js';
-import { formatProLockedMessage } from '../utils/subscription.js';
+import { isValidShortDate, isValidTime, parseOfferDateTime } from '../utils/validation.js';
 import { sendGameOfferToChannel } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -125,23 +124,6 @@ function formatPublishedOffer(offer: GameOffer, id: number): string {
   return lines.join('\n');
 }
 
-function formatPublishedOfferFooter(user: UserProfile, offer: GameOffer): string {
-  if (hasProSubscription(user)) {
-    return TXT.game_offers.subscription_active_offer;
-  }
-  const unlimitedFemale = user.gender === 'Женский'
-    && (offer.sport === '🍒Знакомства' || offer.sport === '🍻По пиву');
-  if (unlimitedFemale) {
-    return TXT.game_offers.unlimited_female;
-  }
-  const remaining = Math.max(0, 1 - user.free_offers_used);
-  return [
-    '',
-    fmt(TXT.game_offers.remaining_offers, { remaining }),
-    TXT.game_offers.subscribe_unlimited,
-  ].join('\n');
-}
-
 function datingInterestsKeyboard(selected: string[] = []) {
   const rows = DATING_INTERESTS.map((item) => {
     const mark = selected.includes(item.ru) ? '✅ ' : '';
@@ -151,29 +133,9 @@ function datingInterestsKeyboard(selected: string[] = []) {
   return Keyboard.inlineKeyboard(rows);
 }
 
-function formatOfferPaywall(user: UserProfile): string {
-  return formatProLockedMessage('game_offers', user.max_user_id);
-}
-
-function offerPaywallKeyboard(): ReturnType<typeof Keyboard.inlineKeyboard> {
-  return Keyboard.inlineKeyboard([
-    [Keyboard.button.callback(TXT.menu.payments, 'menu:payments')],
-    [Keyboard.button.callback(TXT.menu.invite, 'menu:invite')],
-    [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-  ]);
-}
-
 export async function startNewOffer(ctx: AppContext, sport?: SportType): Promise<void> {
   const user = await requireRegistered(ctx);
   if (!user) return;
-
-  if (!canCreateFreeOffer(user)) {
-    const mode = ctx.callback ? 'edit' : 'new';
-    await showCurrentMessage(ctx, formatOfferPaywall(user), {
-      attachments: [offerPaywallKeyboard()],
-    }, mode);
-    return;
-  }
 
   ctx.session.data = {};
   const data: OfferData = {
@@ -321,20 +283,11 @@ async function publishOffer(ctx: AppContext, data: OfferData): Promise<void> {
     created_at: new Date().toISOString(),
   };
   user.games.push(offer);
-  if (!hasProSubscription(user)) {
-    const unlimitedFemale = user.gender === 'Женский'
-      && (offer.sport === '🍒Знакомства' || offer.sport === '🍻По пиву');
-    if (!unlimitedFemale) {
-      user.free_offers_used += 1;
-    }
-  }
   await storage.saveUser(user);
   await sendGameOfferToChannel(ctx.api, user, offer);
   await clearState(ctx);
 
-  let text = formatPublishedOffer(offer, id);
-  text += formatPublishedOfferFooter(user, offer);
-  await ctx.reply(text, { attachments: [backButton()] });
+  await ctx.reply(formatPublishedOffer(offer, id), { attachments: [backButton()] });
 }
 
 async function showMyOffer(ctx: AppContext, data: OfferData): Promise<void> {

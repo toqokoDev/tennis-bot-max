@@ -16,6 +16,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY scripts ./scripts
+COPY certs ./certs
 RUN pip3 install --break-system-packages -r scripts/requirements.txt
 ENV PYTHON_PATH=python3
 RUN mkdir -p /app/data /app/data/sessions /app/data/brackets

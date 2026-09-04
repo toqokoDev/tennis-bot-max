@@ -54,7 +54,10 @@ async function main(): Promise<void> {
   bot.catch((err, ctx) => {
     const message = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
-    logger.error(`Bot error (${ctx.updateType}): ${message}`, stack ?? err);
+    logger.error(`Bot error (${ctx.updateType}): ${message}`, {
+      stack,
+      ...(err instanceof Error ? {} : { err: String(err) }),
+    });
   });
 
   startBackgroundJobs(bot);

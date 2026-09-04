@@ -47,7 +47,10 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
     if (!hasProSubscription(viewer)) {
       await editButtons(ctx, formatProLockedMessage('contacts', viewer.max_user_id), [
         Keyboard.inlineKeyboard([
+          [Keyboard.button.callback(TXT.menu.payments, 'menu:payments')],
+          [Keyboard.button.callback(TXT.menu.invite, 'menu:invite')],
           [Keyboard.button.callback(TXT.common.back, backPayload)],
+          [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
         ]),
       ]);
       return;

@@ -81,18 +81,6 @@ export function hasProSubscription(user: { subscription?: { active: boolean; unt
   return false;
 }
 
-export function canCreateFreeOffer(user: {
-  subscription?: { active: boolean; until: string };
-  free_offers_used: number;
-  gender?: string;
-  sport?: string;
-}): boolean {
-  if (hasProSubscription(user)) return true;
-  // Reference: all women skip the free-offer paywall at the gate
-  if (user.gender === 'Женский') return true;
-  return user.free_offers_used < 1;
-}
-
 export function parseRuDate(dateStr: string): Date | null {
   if (!isValidDate(dateStr)) return null;
   const [d, m, y] = dateStr.split('.').map(Number);

@@ -38,6 +38,22 @@ function tinkoffHttpsAgent(): https.Agent | undefined {
 
 const tinkoffAgent = tinkoffHttpsAgent();
 
+function logPaymentError(label: string, err: unknown): void {
+  if (axios.isAxiosError(err)) {
+    logger.error(label, {
+      message: err.message,
+      code: err.code,
+      status: err.response?.status,
+      data: err.response?.data,
+    });
+    return;
+  }
+  logger.error(label, {
+    message: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
+}
+
 /**
  * Tinkoff token: только скалярные поля. DATA и Receipt исключаются
  * (как в TennisBot / официальной документации).
@@ -106,11 +122,7 @@ export async function generateTinkoffPaymentLink(params: {
       details: res.data.Details,
     });
   } catch (err) {
-    if (axios.isAxiosError(err) && err.response?.data) {
-      logger.error('Tinkoff Init error', err.response.data);
-    } else {
-      logger.error('Tinkoff Init error', err);
-    }
+    logPaymentError('Tinkoff Init error', err);
   }
   return null;
 }
@@ -139,7 +151,7 @@ export async function checkTinkoffPaymentStatus(paymentId: string): Promise<'pen
     if (['REJECTED', 'CANCELED', 'DEADLINE_EXPIRED'].includes(res.data.Status)) return 'failed';
     return 'pending';
   } catch (err) {
-    logger.error('Tinkoff GetState error', err);
+    logPaymentError('Tinkoff GetState error', err);
     return 'failed';
   }
 }
@@ -187,11 +199,7 @@ export async function generateYooKassaPaymentLink(params: {
       provider: 'yookassa',
     };
   } catch (err) {
-    if (axios.isAxiosError(err) && err.response?.data) {
-      logger.error('YooKassa error', err.response.data);
-    } else {
-      logger.error('YooKassa error', err);
-    }
+    logPaymentError('YooKassa error', err);
     return null;
   }
 }
@@ -209,7 +217,7 @@ export async function checkYooKassaPaymentStatus(paymentId: string): Promise<'pe
     if (status === 'canceled') return 'failed';
     return 'pending';
   } catch (err) {
-    logger.error('YooKassa status error', err);
+    logPaymentError('YooKassa status error', err);
     return 'failed';
   }
 }
