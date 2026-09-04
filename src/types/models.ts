@@ -26,6 +26,14 @@ export interface SubscriptionInfo {
   last_expired_notification?: string;
 }
 
+export interface PendingPayment {
+  payment_id: string;
+  email: string;
+  payment_link?: string;
+  provider?: 'tinkoff' | 'yookassa';
+  created_at: string;
+}
+
 export interface GameOffer {
   id: number;
   sport: SportType;
@@ -72,6 +80,7 @@ export interface UserProfile {
   free_offers_used: number;
   games: GameOffer[];
   subscription?: SubscriptionInfo;
+  pending_payment?: PendingPayment;
   created_at: string;
   web_user_id?: string;
   web_domain?: string;
@@ -135,7 +144,7 @@ export interface Tournament {
   comment?: string;
   status: TournamentStatus;
   entry_fee: number;
-  payments: Record<string, { status: 'pending' | 'succeeded'; payment_id: string }>;
+  payments: Record<string, { status: 'pending' | 'succeeded'; payment_id: string; provider?: 'tinkoff' | 'yookassa' }>;
   payment_window?: { active: boolean; deadline_at: string; created_at: string };
   bracket?: Record<string, unknown>;
   round_robin?: Record<string, unknown>;

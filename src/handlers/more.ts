@@ -4,6 +4,7 @@ import type { AppContext } from '../context.js';
 import { beginCommandResponse, showCurrentMessage } from '../utils/bot.js';
 import { isAdmin } from '../config/env.js';
 import { hasProSubscription } from '../utils/validation.js';
+import { formatProLockedMessage } from '../utils/subscription.js';
 import { requireRegistered } from './registration.js';
 import { showToursMenu } from './tours.js';
 import { startFindCoach } from './findCoach.js';
@@ -51,7 +52,9 @@ export function registerMoreHandlers(bot: import('@maxhub/max-bot-api').Bot<AppC
     const user = await requireRegistered(ctx);
     if (!user) return;
     if (!hasProSubscription(user) && !isAdmin(getCtxUserId(ctx))) {
-      await showCurrentMessage(ctx, TXT.more.pro_required, { attachments: [moreBackKeyboard()] });
+      await showCurrentMessage(ctx, formatProLockedMessage('all_players', user.max_user_id), {
+        attachments: [moreBackKeyboard()],
+      });
       return;
     }
     await startAllPlayers(ctx);

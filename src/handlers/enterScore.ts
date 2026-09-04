@@ -23,6 +23,7 @@ import {
 } from '../utils/gameResult.js';
 import { applyRatingUpdate, calculateNewRatings, clampRating } from '../utils/rating.js';
 import { hasProSubscription } from '../utils/validation.js';
+import { formatProLockedMessage } from '../utils/subscription.js';
 import { sendGameNotificationToChannel } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -649,7 +650,12 @@ export async function startEnterScore(ctx: AppContext): Promise<void> {
   const user = await requireRegistered(ctx);
   if (!user) return;
   if (!hasProSubscription(user) && !isAdmin(user.max_user_id)) {
-    await ctx.reply(TXT.enter_score.pro_required);
+    await showCurrentMessage(ctx, formatProLockedMessage('enter_score', user.max_user_id), {
+      attachments: [Keyboard.inlineKeyboard([
+        [Keyboard.button.callback(TXT.menu.payments, 'menu:payments')],
+        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+      ])],
+    });
     return;
   }
   await setState(ctx, AddScoreState.SELECTING_GAME_TYPE, {});

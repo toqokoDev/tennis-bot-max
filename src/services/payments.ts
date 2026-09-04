@@ -1,4 +1,9 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import https from 'https';
+import path from 'path';
+import tls from 'tls';
+import { fileURLToPath } from 'url';
 import axios from 'axios';
 import { env } from '../config/env.js';
 import { logger } from '../logger.js';
@@ -6,17 +11,47 @@ import { logger } from '../logger.js';
 export interface PaymentResult {
   paymentId: string;
   paymentUrl: string;
+  provider: 'tinkoff' | 'yookassa';
 }
 
-function tinkoffToken(params: Record<string, unknown>): string {
-  const flat: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== '' && (typeof v === 'string' || typeof v === 'number')) {
-      flat[k] = v;
-    }
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CERTS_DIR = path.resolve(__dirname, '../../certs');
+const RUSSIAN_TRUSTED_CAS = [
+  path.join(CERTS_DIR, 'russian_trusted_root_ca.pem'),
+  path.join(CERTS_DIR, 'russian_trusted_sub_ca.pem'),
+];
+
+function tinkoffHttpsAgent(): https.Agent | undefined {
+  try {
+    const extra = RUSSIAN_TRUSTED_CAS
+      .filter((p) => fs.existsSync(p))
+      .map((p) => fs.readFileSync(p, 'utf8'));
+    if (!extra.length) return undefined;
+    // Добавляем сертификаты НУЦ к системным (как в TennisBot), не заменяем их
+    const ca = [...tls.rootCertificates, ...extra];
+    return new https.Agent({ ca, keepAlive: true });
+  } catch (err) {
+    logger.warn('Failed to load Tinkoff CA certs', err);
+    return undefined;
   }
-  flat.Password = env.TINKOFF_PASSWORD;
-  const concat = Object.keys(flat).sort().map((k) => flat[k]).join('');
+}
+
+const tinkoffAgent = tinkoffHttpsAgent();
+
+/**
+ * Tinkoff token: только скалярные поля. DATA и Receipt исключаются
+ * (как в TennisBot / официальной документации).
+ */
+function tinkoffToken(payload: Record<string, unknown>): string {
+  const dataForToken: Record<string, string> = {};
+  for (const [k, v] of Object.entries(payload)) {
+    if (k === 'DATA' || k === 'Receipt' || k === 'Token') continue;
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v === 'object') continue;
+    dataForToken[k] = String(v);
+  }
+  dataForToken.Password = env.TINKOFF_PASSWORD;
+  const concat = Object.keys(dataForToken).sort().map((k) => dataForToken[k]).join('');
   return crypto.createHash('sha256').update(concat).digest('hex');
 }
 
@@ -25,36 +60,45 @@ export async function generateTinkoffPaymentLink(params: {
   orderId: string;
   description: string;
   email: string;
+  userId?: number;
 }): Promise<PaymentResult | null> {
   if (!env.TINKOFF_TERMINAL_KEY || !env.TINKOFF_PASSWORD) {
     logger.warn('Tinkoff credentials not configured');
     return null;
   }
-  const amountKopecks = params.amount * 100;
+  const amountKopecks = Math.round(params.amount * 100);
   const body: Record<string, unknown> = {
     TerminalKey: env.TINKOFF_TERMINAL_KEY,
     Amount: amountKopecks,
     OrderId: params.orderId,
     Description: params.description,
+    DATA: {
+      user_id: String(params.userId ?? ''),
+    },
     Receipt: {
       Email: params.email,
       Taxation: 'usn_income',
       Items: [{
         Name: params.description.slice(0, 128),
         Price: amountKopecks,
-        Quantity: 1,
+        Quantity: 1.0,
         Amount: amountKopecks,
         Tax: 'none',
-        PaymentMethod: 'full_payment',
-        PaymentObject: 'service',
       }],
     },
   };
   body.Token = tinkoffToken(body);
   try {
-    const res = await axios.post('https://securepay.tinkoff.ru/v2/Init', body);
+    const res = await axios.post('https://securepay.tinkoff.ru/v2/Init', body, {
+      httpsAgent: tinkoffAgent,
+      timeout: 20000,
+    });
     if (res.data.Success) {
-      return { paymentId: res.data.PaymentId, paymentUrl: res.data.PaymentURL };
+      return {
+        paymentId: String(res.data.PaymentId),
+        paymentUrl: res.data.PaymentURL,
+        provider: 'tinkoff',
+      };
     }
     logger.warn('Tinkoff init failed', {
       errorCode: res.data.ErrorCode,
@@ -62,24 +106,40 @@ export async function generateTinkoffPaymentLink(params: {
       details: res.data.Details,
     });
   } catch (err) {
-    logger.error('Tinkoff error', err);
+    if (axios.isAxiosError(err) && err.response?.data) {
+      logger.error('Tinkoff Init error', err.response.data);
+    } else {
+      logger.error('Tinkoff Init error', err);
+    }
   }
   return null;
 }
 
 export async function checkTinkoffPaymentStatus(paymentId: string): Promise<'pending' | 'succeeded' | 'failed'> {
-  if (!env.TINKOFF_TERMINAL_KEY) return 'failed';
-  const body: Record<string, string | number> = {
+  if (!env.TINKOFF_TERMINAL_KEY || !env.TINKOFF_PASSWORD) return 'failed';
+  const body: Record<string, string> = {
     TerminalKey: env.TINKOFF_TERMINAL_KEY,
-    PaymentId: paymentId,
+    PaymentId: String(paymentId),
   };
   body.Token = tinkoffToken(body);
   try {
-    const res = await axios.post('https://securepay.tinkoff.ru/v2/GetState', body);
+    const res = await axios.post('https://securepay.tinkoff.ru/v2/GetState', body, {
+      httpsAgent: tinkoffAgent,
+      timeout: 15000,
+    });
+    if (!res.data.Success) {
+      logger.warn('Tinkoff GetState failed', {
+        errorCode: res.data.ErrorCode,
+        tinkoffMessage: res.data.Message,
+        paymentId,
+      });
+      return 'failed';
+    }
     if (res.data.Status === 'CONFIRMED') return 'succeeded';
     if (['REJECTED', 'CANCELED', 'DEADLINE_EXPIRED'].includes(res.data.Status)) return 'failed';
     return 'pending';
-  } catch {
+  } catch (err) {
+    logger.error('Tinkoff GetState error', err);
     return 'failed';
   }
 }
@@ -122,8 +182,9 @@ export async function generateYooKassaPaymentLink(params: {
       },
     );
     return {
-      paymentId: res.data.id,
+      paymentId: String(res.data.id),
       paymentUrl: res.data.confirmation.confirmation_url,
+      provider: 'yookassa',
     };
   } catch (err) {
     if (axios.isAxiosError(err) && err.response?.data) {
@@ -135,6 +196,32 @@ export async function generateYooKassaPaymentLink(params: {
   }
 }
 
+export async function checkYooKassaPaymentStatus(paymentId: string): Promise<'pending' | 'succeeded' | 'failed'> {
+  if (!env.SHOP_ID || !env.SECRET_KEY) return 'failed';
+  try {
+    const auth = Buffer.from(`${env.SHOP_ID}:${env.SECRET_KEY}`).toString('base64');
+    const res = await axios.get(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
+      headers: { Authorization: `Basic ${auth}` },
+      timeout: 15000,
+    });
+    const status = res.data?.status as string | undefined;
+    if (status === 'succeeded') return 'succeeded';
+    if (status === 'canceled') return 'failed';
+    return 'pending';
+  } catch (err) {
+    logger.error('YooKassa status error', err);
+    return 'failed';
+  }
+}
+
+export async function checkPaymentStatus(
+  paymentId: string,
+  provider: 'tinkoff' | 'yookassa' = 'tinkoff',
+): Promise<'pending' | 'succeeded' | 'failed'> {
+  if (provider === 'yookassa') return checkYooKassaPaymentStatus(paymentId);
+  return checkTinkoffPaymentStatus(paymentId);
+}
+
 export async function createSubscriptionPayment(params: {
   userId: number;
   email: string;
@@ -143,9 +230,11 @@ export async function createSubscriptionPayment(params: {
   const base = {
     amount: env.SUBSCRIPTION_PRICE,
     orderId,
-    description: 'PRO подписка Tennis-Play 1 месяц',
+    description: 'Оплата подписки для расширенного функционала',
     email: params.email,
+    userId: params.userId,
   };
+  // Как в TennisBot: основной провайдер — Tinkoff
   return (await generateTinkoffPaymentLink(base)) ?? generateYooKassaPaymentLink(base);
 }
 
@@ -161,6 +250,7 @@ export async function createTournamentPayment(params: {
     orderId,
     description: `Взнос турнира ${params.tournamentId}`,
     email: params.email,
+    userId: params.userId,
   };
   return (await generateTinkoffPaymentLink(base)) ?? generateYooKassaPaymentLink(base);
 }

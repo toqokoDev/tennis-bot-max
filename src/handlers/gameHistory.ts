@@ -14,6 +14,7 @@ import {
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 import { hasProSubscription } from '../utils/validation.js';
+import { formatProLockedMessage } from '../utils/subscription.js';
 import type { UserProfile } from '../types/models.js';
 
 async function loadUsersMap(ids: number[]): Promise<Map<number, UserProfile>> {
@@ -63,7 +64,7 @@ export async function showGameHistory(
   const isOwnProfile = targetUserId === viewerId;
 
   if (!isOwnProfile && !hasProSubscription(viewer) && !isAdmin(viewerId)) {
-    await editButtons(ctx, TXT.profile.history_pro, [
+    await editButtons(ctx, formatProLockedMessage('game_history', viewerId), [
       Keyboard.inlineKeyboard([
         [Keyboard.button.callback(TXT.common.back, 'history_back_profile')],
       ]),

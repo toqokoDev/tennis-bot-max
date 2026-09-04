@@ -36,7 +36,7 @@ import {
   sendTournamentApplicationToChannel,
   sendTournamentCreatedToChannel,
 } from '../services/channels.js';
-import { createTournamentPayment, checkTinkoffPaymentStatus } from '../services/payments.js';
+import { createTournamentPayment, checkPaymentStatus } from '../services/payments.js';
 import { uploadBracketImage } from '../services/bracketImage.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -54,6 +54,7 @@ type TourPayData = {
   email?: string;
   payment_id?: string;
   payment_url?: string;
+  provider?: 'tinkoff' | 'yookassa';
 };
 
 type CardNav = {
@@ -268,13 +269,18 @@ export async function handleTournamentPaymentMessage(ctx: AppContext): Promise<b
 
   const tourn = await storage.getTournament(data.tournament_id);
   if (tourn) {
-    tourn.payments[String(userId)] = { status: 'pending', payment_id: payment.paymentId };
+    tourn.payments[String(userId)] = {
+      status: 'pending',
+      payment_id: payment.paymentId,
+      provider: payment.provider,
+    };
     await storage.saveTournament(tourn);
   }
 
   data.email = text;
   data.payment_id = payment.paymentId;
   data.payment_url = payment.paymentUrl;
+  data.provider = payment.provider;
   await setState(ctx, TournamentPaymentStates.CONFIRM_PAYMENT, data);
   await ctx.reply(TXT.tournament.payment_link, {
     attachments: [Keyboard.inlineKeyboard([
@@ -288,13 +294,14 @@ export async function handleTournamentPaymentMessage(ctx: AppContext): Promise<b
 
 async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): Promise<void> {
   const data = getStateData<TourPayData>(ctx);
-  const paymentId = data.payment_id
-    ?? (await storage.getTournament(tournamentId))?.payments[String(getCtxUserId(ctx))]?.payment_id;
+  const stored = (await storage.getTournament(tournamentId))?.payments[String(getCtxUserId(ctx))];
+  const paymentId = data.payment_id ?? stored?.payment_id;
+  const provider = data.provider ?? stored?.provider ?? 'tinkoff';
   if (!paymentId) {
     await ctx.reply(TXT.tournament.payment_not_confirmed, { attachments: [backButton()] });
     return;
   }
-  const status = await checkTinkoffPaymentStatus(paymentId);
+  const status = await checkPaymentStatus(paymentId, provider);
   if (status !== 'succeeded') {
     await ctx.reply(TXT.tournament.payment_not_confirmed, { attachments: [backButton()] });
     return;
@@ -305,7 +312,7 @@ async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): 
     return;
   }
   const userId = getCtxUserId(ctx);
-  tourn.payments[String(userId)] = { status: 'succeeded', payment_id: paymentId };
+  tourn.payments[String(userId)] = { status: 'succeeded', payment_id: paymentId, provider };
   if (tourn.participants[String(userId)]) {
     tourn.participants[String(userId)].paid = true;
   }

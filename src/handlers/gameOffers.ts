@@ -2,7 +2,6 @@ import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getMessageText } from '../context.js';
-import { env, getDeepLink } from '../config/env.js';
 import {
   COUNTRIES,
   DATING_GOALS,
@@ -29,6 +28,7 @@ import {
   type GameStep,
 } from '../utils/game.js';
 import { canCreateFreeOffer, hasProSubscription, isValidShortDate, isValidTime, parseOfferDateTime } from '../utils/validation.js';
+import { formatProLockedMessage } from '../utils/subscription.js';
 import { sendGameOfferToChannel } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -152,23 +152,7 @@ function datingInterestsKeyboard(selected: string[] = []) {
 }
 
 function formatOfferPaywall(user: UserProfile): string {
-  const link = getDeepLink(`ref_${user.max_user_id}`);
-  return [
-    TXT.game_offers.paywall_title,
-    '',
-    TXT.game_offers.paywall_limit,
-    '',
-    TXT.game_offers.paywall_subscription_info,
-    '',
-    fmt(TXT.game_offers.paywall_price, { price: env.SUBSCRIPTION_PRICE }),
-    fmt(TXT.game_offers.paywall_go_payments, { payments_section: TXT.menu.payments }),
-    '',
-    TXT.game_offers.paywall_invite_friends,
-    '',
-    `${TXT.game_offers.paywall_invite_link} ${link}`,
-    '',
-    fmt(TXT.game_offers.paywall_invite_stats, { invite_section: TXT.menu.invite }),
-  ].join('\n');
+  return formatProLockedMessage('game_offers', user.max_user_id);
 }
 
 function offerPaywallKeyboard(): ReturnType<typeof Keyboard.inlineKeyboard> {

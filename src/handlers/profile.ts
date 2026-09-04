@@ -7,6 +7,7 @@ import { editButtons, showProfile } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 import { hasProSubscription } from '../utils/validation.js';
+import { formatProLockedMessage } from '../utils/subscription.js';
 import { registerProfileEditHandlers, showOwnProfile } from './profileEdit.js';
 import { registerGameHistoryHandlers } from './gameHistory.js';
 
@@ -44,7 +45,7 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
     const targetId = Number(getCallbackPayload(ctx).replace('profile_contact:', ''));
     const backPayload = `partner_show_profile_${targetId}`;
     if (!hasProSubscription(viewer)) {
-      await editButtons(ctx, TXT.profile.contact_pro, [
+      await editButtons(ctx, formatProLockedMessage('contacts', viewer.max_user_id), [
         Keyboard.inlineKeyboard([
           [Keyboard.button.callback(TXT.common.back, backPayload)],
         ]),
