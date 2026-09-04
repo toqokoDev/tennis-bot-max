@@ -17,6 +17,7 @@ import { handlePaymentMessage } from './handlers/payments.js';
 import { handleTournamentPaymentMessage, handleTournamentBrowseMessage } from './handlers/tournament.js';
 
 import { handleAdminMessage } from './handlers/admin.js';
+import { handleAdminTournamentMessage } from './handlers/adminTournament.js';
 import { startBackgroundJobs, stopBackgroundJobs } from './jobs/tournamentJobs.js';
 import { clearWebhookSubscriptions } from './utils/clearWebhooks.js';
 import { beginCommandResponse, showMainMenu } from './utils/bot.js';
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
     if (await handleTournamentBrowseMessage(ctx)) return;
     if (await handleTournamentPaymentMessage(ctx)) return;
     if (await handlePaymentMessage(ctx)) return;
+    if (await handleAdminTournamentMessage(ctx)) return;
     const text = getMessageText(ctx) ?? '';
     if (await handleAdminMessage(ctx, text)) return;
 

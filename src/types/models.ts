@@ -146,6 +146,8 @@ export interface Tournament {
   duration: string;
   participants_count: number;
   participants: Record<string, ParticipantInfo>;
+  /** Порядок посева (user id как строка) */
+  seeding?: string[];
   show_in_list: boolean;
   hide_bracket: boolean;
   comment?: string;
@@ -160,6 +162,7 @@ export interface Tournament {
   payment_window?: { active: boolean; deadline_at: string; created_at: string };
   bracket?: Record<string, unknown>;
   round_robin?: Record<string, unknown>;
+  started_at?: string;
   created_by: string;
   created_at: string;
 }

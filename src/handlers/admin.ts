@@ -8,7 +8,7 @@ import { calculateLevelFromPoints } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { AdminBroadcastStates, AdminSubscriptionStates } from '../types/states.js';
-import type { BannedUser, CompletedGame, SubscriptionInfo, Tournament, UserProfile } from '../types/models.js';
+import type { BannedUser, CompletedGame, SubscriptionInfo, UserProfile } from '../types/models.js';
 import {
   askText,
   beginCommandResponse,
@@ -32,7 +32,6 @@ type SubData = {
 };
 
 const SUB_PAGE_SIZE = 15;
-const TOURN_PAGE_SIZE = 5;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -75,29 +74,6 @@ export async function showAdminMenu(ctx: AppContext, mode: 'new' | 'edit' = 'edi
   await showCurrentMessage(ctx, TXT.admin.menu, { attachments: [adminKeyboard()] }, mode);
 }
 
-function tournamentLocation(t: Tournament): string {
-  if (t.city === 'Москва' && t.district) return `${t.city} (${t.district})`;
-  return [t.city, t.country].filter(Boolean).join(', ') || '—';
-}
-
-function participantsLabel(t: Tournament): string {
-  return `${Object.keys(t.participants ?? {}).length}/${t.participants_count}`;
-}
-
-function sortTournaments(items: [string, Tournament][]): [string, Tournament][] {
-  return [...items].sort((a, b) => {
-    const sa = a[1].status === 'active' ? 0 : a[1].status === 'started' ? 1 : 2;
-    const sb = b[1].status === 'active' ? 0 : b[1].status === 'started' ? 1 : 2;
-    if (sa !== sb) return sa - sb;
-    return (b[1].created_at || '').localeCompare(a[1].created_at || '');
-  });
-}
-
-function tournamentButtonLabel(t: Tournament): string {
-  const num = /№(\d+)/.exec(t.name)?.[1] ?? '?';
-  const label = `№${num} | ${t.level || '?'} | ${tournamentLocation(t)} | ${participantsLabel(t)}`;
-  return label.length > 60 ? `${label.slice(0, 57)}…` : label;
-}
 
 async function rollbackGamesForUser(
   users: Record<string, UserProfile>,
@@ -362,59 +338,6 @@ async function showUnbanMenu(ctx: AppContext): Promise<void> {
   });
 }
 
-async function showEditTournamentsPage(ctx: AppContext, page = 0): Promise<void> {
-  const all = await storage.getTournaments();
-  const items = sortTournaments(Object.entries(all));
-  if (!items.length) {
-    await showCurrentMessage(ctx, TXT.admin.tournaments_empty, {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.create_tournament, 'admin_create_tournament')],
-        [Keyboard.button.callback(TXT.admin.back_to_main, 'admin_back_to_main')],
-      ])],
-    });
-    return;
-  }
-  const totalPages = Math.max(1, Math.ceil(items.length / TOURN_PAGE_SIZE));
-  const safePage = Math.max(0, Math.min(page, totalPages - 1));
-  const slice = items.slice(safePage * TOURN_PAGE_SIZE, (safePage + 1) * TOURN_PAGE_SIZE);
-  const buttons = slice.map(([id, t]) => [
-    Keyboard.button.callback(tournamentButtonLabel(t), `edit_tournament:${id}`),
-  ]);
-  const nav: ReturnType<typeof Keyboard.button.callback>[] = [];
-  if (safePage > 0) nav.push(Keyboard.button.callback('⬅️', `admin_tournaments_page:${safePage - 1}`));
-  if (safePage < totalPages - 1) nav.push(Keyboard.button.callback('➡️', `admin_tournaments_page:${safePage + 1}`));
-  if (nav.length) buttons.push(nav);
-  buttons.push([Keyboard.button.callback(TXT.admin.back_to_main, 'admin_back_to_main')]);
-  await showCurrentMessage(ctx, fmt(TXT.admin.tournaments_pick, {
-    page: safePage + 1,
-    pages: totalPages,
-    total: items.length,
-  }), { attachments: [Keyboard.inlineKeyboard(buttons)] });
-}
-
-async function showTournamentAdminView(ctx: AppContext, tournamentId: string): Promise<void> {
-  const t = await storage.getTournament(tournamentId);
-  if (!t) {
-    await showCurrentMessage(ctx, TXT.admin.tournament_not_found, { attachments: [backToAdminKeyboard()] });
-    return;
-  }
-  await showCurrentMessage(ctx, fmt(TXT.admin.tournament_view, {
-    name: t.name,
-    sport: t.sport,
-    location: tournamentLocation(t),
-    type: t.type,
-    participants: Object.keys(t.participants ?? {}).length,
-    max: t.participants_count,
-    status: t.status,
-    id: tournamentId,
-  }), {
-    attachments: [Keyboard.inlineKeyboard([
-      [Keyboard.button.callback(TXT.admin.delete_tournament, `admin_delete_tournament:${tournamentId}`)],
-      [Keyboard.button.callback(TXT.admin.back, 'admin_edit_tournaments')],
-      [Keyboard.button.callback(TXT.admin.back_to_main, 'admin_back_to_main')],
-    ])],
-  });
-}
 
 function broadcastPreview(data: BroadcastData): string {
   const parts: string[] = [];
@@ -778,63 +701,6 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     });
   });
 
-  bot.action('admin_edit_tournaments', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    if (!(await requireAdmin(ctx))) return;
-    await showEditTournamentsPage(ctx, 0);
-  });
-
-  bot.action(/^admin_tournaments_page:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    if (!(await requireAdmin(ctx))) return;
-    const page = Number(getCallbackPayload(ctx).replace('admin_tournaments_page:', '')) || 0;
-    await showEditTournamentsPage(ctx, page);
-  });
-
-  bot.action(/^edit_tournament:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    if (!(await requireAdmin(ctx))) return;
-    const id = getCallbackPayload(ctx).replace('edit_tournament:', '');
-    await showTournamentAdminView(ctx, id);
-  });
-
-  bot.action(/^admin_delete_tournament:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    if (!(await requireAdmin(ctx))) return;
-    const id = getCallbackPayload(ctx).replace('admin_delete_tournament:', '');
-    const t = await storage.getTournament(id);
-    if (!t) {
-      await showCurrentMessage(ctx, TXT.admin.tournament_not_found, { attachments: [backToAdminKeyboard()] });
-      return;
-    }
-    await showCurrentMessage(ctx, fmt(TXT.admin.tournament_delete_confirm, {
-      name: t.name,
-      location: tournamentLocation(t),
-      participants: participantsLabel(t),
-    }), { attachments: [confirmKeyboard('delete_tournament', id)] });
-  });
-
-  bot.action(/^admin_confirm_delete_tournament:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    if (!(await requireAdmin(ctx))) return;
-    const id = getCallbackPayload(ctx).replace('admin_confirm_delete_tournament:', '');
-    const all = await storage.getTournaments();
-    const t = all[id];
-    if (!t) {
-      await showCurrentMessage(ctx, TXT.admin.tournament_not_found, { attachments: [backToAdminKeyboard()] });
-      return;
-    }
-    delete all[id];
-    await storage.saveTournaments(all);
-    const apps = await storage.getApplications();
-    await storage.saveApplications(apps.filter((a) => a.tournament_id !== id));
-    await showCurrentMessage(ctx, fmt(TXT.admin.tournament_deleted, { name: t.name }), {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.back, 'admin_edit_tournaments')],
-        [Keyboard.button.callback(TXT.admin.back_to_main, 'admin_back_to_main')],
-      ])],
-    });
-  });
 
   bot.action(/^admin_select_user:/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });

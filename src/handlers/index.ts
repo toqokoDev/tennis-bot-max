@@ -15,6 +15,7 @@ import { registerMoreHandlers, registerMenuHears } from './more.js';
 import { registerFindCoachHandlers } from './findCoach.js';
 import { registerAllPlayersHandlers } from './allPlayers.js';
 import { registerAdminHandlers } from './admin.js';
+import { registerAdminTournamentHandlers } from './adminTournament.js';
 
 export function registerAllHandlers(bot: Bot<AppContext>): void {
   registerStartHandlers(bot);
@@ -32,5 +33,6 @@ export function registerAllHandlers(bot: Bot<AppContext>): void {
   registerFindCoachHandlers(bot);
   registerAllPlayersHandlers(bot);
   registerAdminHandlers(bot);
+  registerAdminTournamentHandlers(bot);
   registerMenuHears(bot);
 }

@@ -70,14 +70,21 @@ export function advanceWinner(bracket: BracketTree, matchId: string, winnerId: n
 }
 
 export function generateRoundRobin(participantIds: number[]): Record<string, unknown> {
-  const table: Record<number, { played: number; wins: number; points: number }> = {};
+  const table: Record<string, { played: number; wins: number; points: number }> = {};
   for (const id of participantIds) {
-    table[id] = { played: 0, wins: 0, points: 0 };
+    table[String(id)] = { played: 0, wins: 0, points: 0 };
   }
-  const matches: { p1: number; p2: number; played: boolean }[] = [];
+  const matches: { id: string; p1: number; p2: number; played: boolean }[] = [];
+  let idx = 0;
   for (let i = 0; i < participantIds.length; i++) {
     for (let j = i + 1; j < participantIds.length; j++) {
-      matches.push({ p1: participantIds[i], p2: participantIds[j], played: false });
+      matches.push({
+        id: `rr_${idx}`,
+        p1: participantIds[i]!,
+        p2: participantIds[j]!,
+        played: false,
+      });
+      idx += 1;
     }
   }
   return { table, matches };

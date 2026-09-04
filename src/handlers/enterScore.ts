@@ -28,6 +28,7 @@ import { sendGameNotificationToChannel } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 import { getCtxUserId } from '../context.js';
+import { applyTournamentMatchResult, listPendingMatches } from '../utils/tournamentLifecycle.js';
 import type { CompletedGame, UserProfile } from '../types/models.js';
 
 const USERS_PER_PAGE = 8;
@@ -556,6 +557,21 @@ async function saveConfirmedScore(ctx: AppContext): Promise<void> {
 
   for (const profile of outcome.profiles) {
     await storage.saveUser(profile);
+  }
+
+  if (game.game_type === 'tournament' && game.tournament_id && game.winner_ids[0] != null) {
+    const tourn = await storage.getTournament(game.tournament_id);
+    if (tourn) {
+      const winnerId = game.winner_ids[0];
+      const pending = listPendingMatches(tourn).find((m) => (
+        (m.player1 === game.players[0] && m.player2 === game.players[1])
+        || (m.player1 === game.players[1] && m.player2 === game.players[0])
+      ));
+      if (pending) {
+        const updated = applyTournamentMatchResult(tourn, pending.id, winnerId, game.sets);
+        await storage.saveTournament(updated);
+      }
+    }
   }
 
   await sendGameNotificationToChannel(ctx.api, game, profilesToMap(outcome.profiles));
