@@ -4,91 +4,14 @@ from typing import List, Dict, Any, Optional
 from PIL import Image, ImageDraw, ImageFont
 from PIL import Image as PILImage
 
-from .paths import BASE_DIR, FONTS_DIR
+from .paths import BASE_DIR
+from .fonts import load_bracket_fonts, load_font
 
 
 def _load_fonts():
-    """Загрузка шрифтов с приоритетом Circe, затем Arial/DejaVu, затем дефолт."""
-    def _try_font(paths, size):
-        for p in paths:
-            try:
-                return ImageFont.truetype(p, size)
-            except Exception:
-                continue
-        return None
-
-    circe_regular = [
-        "Circe-Regular.ttf",
-        "Circe.ttf",
-        os.path.join(str(FONTS_DIR), "Circe-Regular.ttf"),
-        os.path.join(str(FONTS_DIR), "Circe.ttf"),
-    ]
-    circe_bold = [
-        "Circe-Bold.ttf",
-        os.path.join(str(FONTS_DIR), "Circe-Bold.ttf"),
-    ]
-
-    # Пытаемся Circe
-    title_font = _try_font(circe_bold, 18)
-    subtitle_font = _try_font(circe_regular, 18)
-    header_font = _try_font(circe_bold, 18)
-    cell_font = _try_font(circe_regular, 24)
-    
-
-    # Фолбэк Arial
-    if not title_font:
-        try:
-            title_font = ImageFont.truetype("arialbd.ttf", 18)
-        except Exception:
-            title_font = None
-    if not subtitle_font:
-        try:
-            subtitle_font = ImageFont.truetype("arial.ttf", 18)
-        except Exception:
-            subtitle_font = None
-    if not header_font:
-        try:
-            header_font = ImageFont.truetype("arialbd.ttf", 18)
-        except Exception:
-            header_font = None
-    if not cell_font:
-        try:
-            cell_font = ImageFont.truetype("arial.ttf", 24)
-        except Exception:
-            cell_font = None
-
-    # Фолбэк DejaVu
-    if not title_font:
-        try:
-            title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
-        except Exception:
-            title_font = None
-    if not subtitle_font:
-        try:
-            subtitle_font = ImageFont.truetype("DejaVuSans.ttf", 18)
-        except Exception:
-            subtitle_font = None
-    if not header_font:
-        try:
-            header_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
-        except Exception:
-            header_font = None
-    if not cell_font:
-        try:
-            cell_font = ImageFont.truetype("DejaVuSans.ttf", 24)
-        except Exception:
-            cell_font = None
-
-    # Последний фолбэк — дефолт
-    if not title_font:
-        title_font = ImageFont.load_default()
-    if not subtitle_font:
-        subtitle_font = ImageFont.load_default()
-    if not header_font:
-        header_font = ImageFont.load_default()
-    if not cell_font:
-        cell_font = ImageFont.load_default()
-    return title_font, subtitle_font, header_font, cell_font
+    """Загрузка шрифтов с кириллицей (bundled DejaVu / system Arial)."""
+    fonts = load_bracket_fonts(title=22, body=18, header=18, cell=22, small=15)
+    return fonts["title"], fonts["subtitle"], fonts["header"], fonts["cell"]
 
 
 def _sanitize_title(text: str) -> str:
@@ -120,9 +43,39 @@ def build_round_robin_table(players: List[Dict[str, Any]], results: Optional[Lis
     results: опционально список завершенных игр вида {player1_id, player2_id, score, winner_id}
     """
     title_font, subtitle_font, header_font, cell_font = _load_fonts()
-
+    title_text = _sanitize_title(title)
     n = len(players)
-    
+
+    # Пока участников мало — понятная карточка вместо вырожденной 1×1 таблицы
+    if n < 2:
+        width, height = 900, 320
+        image = Image.new('RGB', (width, height), (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        padding = 28
+        try:
+            bbox = draw.textbbox((0, 0), title_text, font=title_font)
+            draw.text(((width - (bbox[2] - bbox[0])) // 2, padding), title_text, fill=(31, 41, 55), font=title_font)
+        except Exception:
+            draw.text((padding, padding), title_text, fill=(31, 41, 55), font=title_font)
+
+        lines = [
+            f"Участников зарегистрировано: {n}",
+            "Минимум для круговой сетки: 2 игрока.",
+            "Таблица появится, когда наберётся достаточно участников.",
+        ]
+        if n == 1 and players:
+            name = (players[0].get('name') or '').strip()
+            if name:
+                lines.insert(1, f"Сейчас в турнире: {name}")
+        y = 90
+        for line in lines:
+            draw.text((padding, y), line, fill=(55, 65, 81), font=cell_font)
+            y += 36
+        buf = io.BytesIO()
+        image.save(buf, format='PNG')
+        buf.seek(0)
+        return buf.getvalue()
+
     # Сначала парсим результаты для определения ширины ячеек
     def _parse_ids_early(r: Dict[str, Any]) -> Optional[tuple]:
         p1 = r.get('player1_id')
@@ -185,44 +138,57 @@ def build_round_robin_table(players: List[Dict[str, Any]], results: Optional[Lis
                 max_score_width = max(max_score_width, score_width)
             except Exception:
                 pass
-    
+
     # Размеры таблицы
-    # Минимальная ширина для аватара (60 + отступы), максимум под текст + отступы (15px с каждой стороны)
-    cell_w = max(80, min(180, max_score_width + 30)) if max_score_width > 0 else 100
-    cell_h = 70  # Увеличено для больших шрифтов
-    left_col_w = 350  # Увеличено для полных имен
-    top_row_h = 70  # Увеличено для больших аватаров
-    extra_cell_w = 105  # Размер для колонок с цифрами
-    padding = 20
-    
-    # Проверяем, завершён ли турнир (все матчи сыграны)
-    # В круговой системе должно быть n*(n-1)/2 матчей
+    cell_w = max(90, min(180, max_score_width + 30)) if max_score_width > 0 else 110
+    cell_h = 72
+    left_col_w = 320
+    top_row_h = 72
+    # Ширина доп. колонок по самому длинному заголовку
+    extra_cols_probe = ["Победы", "Очки", "Места"]
+    extra_cell_w = 100
+    for col_name in extra_cols_probe:
+        try:
+            bbox = draw_temp.textbbox((0, 0), col_name, font=cell_font)
+            extra_cell_w = max(extra_cell_w, (bbox[2] - bbox[0]) + 24)
+        except Exception:
+            pass
+    padding = 24
+
     total_matches_needed = n * (n - 1) // 2
     has_results = results and len(results) > 0
     tournament_finished = has_results and len(results) >= total_matches_needed
-    
-    # Колонку "Места" показываем только если турнир завершён
+
     if tournament_finished:
         extra_cols = ["Победы", "Очки", "Места"]
     else:
         extra_cols = ["Победы", "Очки"]
 
-    width = padding * 2 + left_col_w + n * cell_w + len(extra_cols) * extra_cell_w
-    # Уменьшаем дополнительную высоту под описание турнира
-    height = padding * 2 + top_row_h + n * cell_h + 260
+    # Высота заголовка (с запасом), чтобы таблица не наезжала на название
+    try:
+        title_bbox = draw_temp.textbbox((0, 0), title_text, font=title_font)
+        title_h = max(28, title_bbox[3] - title_bbox[1])
+    except Exception:
+        title_h = 28
+    title_block = title_h + 36
 
-    image = Image.new('RGB', (max(width, 800), height), (255, 255, 255))
+    note_lines = 14
+    note_block = note_lines * 18 + 40
+
+    width = padding * 2 + left_col_w + n * cell_w + len(extra_cols) * extra_cell_w
+    height = padding + title_block + top_row_h + n * cell_h + note_block + padding
+
+    image = Image.new('RGB', (max(width, 900), height), (255, 255, 255))
     draw = ImageDraw.Draw(image)
 
     # Заголовок турнира
-    title_text = _sanitize_title(title)
     try:
         bbox = draw.textbbox((0, 0), title_text, font=title_font)
-        draw.text(((image.width - (bbox[2] - bbox[0])) // 2, 20), title_text, fill=(31, 41, 55), font=title_font)
+        draw.text(((image.width - (bbox[2] - bbox[0])) // 2, padding), title_text, fill=(31, 41, 55), font=title_font)
     except Exception:
-        draw.text((padding, 20), title_text, fill=(31, 41, 55), font=title_font)
+        draw.text((padding, padding), title_text, fill=(31, 41, 55), font=title_font)
 
-    start_y = padding + 40
+    start_y = padding + title_block
     start_x = padding
 
     # Рамка таблицы
@@ -274,8 +240,8 @@ def build_round_robin_table(players: List[Dict[str, Any]], results: Optional[Lis
                         th = max(0, bbox[3] - bbox[1])
                         tx = (size - tw) // 2
                         ty = (size - th) // 2
-                        # Текст белым без обводки (как в олимпийской сетке)
-                        d.text((tx, ty), initials, fill=(255, 255, 255), font=font)
+                        # Тёмный текст на светло-сером плейсхолдере (кириллица читаема)
+                        d.text((tx, ty), initials, fill=(55, 65, 81), font=font)
                 except Exception:
                     pass
                 draw._image.paste(img, (px, py), img)
@@ -594,28 +560,7 @@ def build_round_robin_table(players: List[Dict[str, Any]], results: Optional[Lis
 
 В случае, когда число побед у игрока не совпадает с другими, дополнительный учёт очков в сетах не требуется."""
     try:
-        # Подгрузим уменьшенный шрифт для описания
-        def _load_small_font(sz: int = 12) -> ImageFont.FreeTypeFont:
-            candidates = [
-                ("Circe-Regular.ttf", sz),
-                ("Circe.ttf", sz),
-                (os.path.join(str(FONTS_DIR), "Circe-Regular.ttf"), sz),
-                (os.path.join(str(FONTS_DIR), "Circe.ttf"), sz),
-            ]
-            for path, size in candidates:
-                try:
-                    return ImageFont.truetype(path, size)
-                except Exception:
-                    continue
-            try:
-                return ImageFont.truetype("arial.ttf", sz)
-            except Exception:
-                try:
-                    return ImageFont.truetype("DejaVuSans.ttf", sz)
-                except Exception:
-                    return ImageFont.load_default()
-
-        small_note_font = _load_small_font(16)
+        small_note_font = load_font(15, bold=False)
         y_pos = table_y + table_h + 25
         line_spacing = 18  # Увеличенный межстрочный интервал для читаемости
         for line in note.split('\n'):

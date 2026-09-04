@@ -2,7 +2,7 @@ import os
 from typing import List, Tuple, Optional
 from PIL import Image, ImageDraw, ImageFont
 
-from .paths import BASE_DIR, FONTS_DIR
+from .paths import BASE_DIR
 from .models import Player, Match, TournamentBracket
 
 
@@ -57,148 +57,16 @@ class BracketImageGenerator:
         # Увеличенный отступ между подписью мини-сетки и первой ячейкой
         self.mini_title_spacing = 24
 
-        # Загрузка шрифтов: сначала Circe, затем Arial/DejaVu, затем дефолт
-        def _try_load_font(candidates, size):
-            for path in candidates:
-                try:
-                    return ImageFont.truetype(path, size)
-                except Exception:
-                    continue
-            return None
+        # Загрузка шрифтов с кириллицей (bundled DejaVu / system fonts)
+        from .fonts import load_font
 
-        circe_regular_candidates = [
-            "Circe-Regular.ttf",
-            "Circe.ttf",
-            os.path.join(str(FONTS_DIR), "Circe-Regular.ttf"),
-            os.path.join(str(FONTS_DIR), "Circe.ttf"),
-            os.path.join(str(BASE_DIR), "fonts", "Circe-Regular.ttf"),
-            os.path.join(str(BASE_DIR), "fonts", "Circe.ttf"),
-        ]
-        circe_bold_candidates = [
-            "Circe-Bold.ttf",
-            os.path.join(str(FONTS_DIR), "Circe-Bold.ttf"),
-            os.path.join(str(BASE_DIR), "fonts", "Circe-Bold.ttf"),
-        ]
-
-        # Пытаемся Circe
-        self.font = _try_load_font(circe_regular_candidates, self.font_size)
-        self.bold_font = _try_load_font(circe_bold_candidates, self.font_size)
-        self.name_font = _try_load_font(circe_regular_candidates, self.name_font_size)
-        self.name_bold_font = _try_load_font(circe_bold_candidates, self.name_font_size)
-        self.title_font = _try_load_font(circe_bold_candidates, self.title_font_size)
-        self.subtitle_font = _try_load_font(circe_regular_candidates, self.subtitle_font_size)
-        self.score_font = _try_load_font(circe_regular_candidates, self.score_font_size)
-
-        # Фолбэк Arial
-        if not self.font:
-            try:
-                self.font = ImageFont.truetype("arial.ttf", self.font_size)
-            except Exception:
-                self.font = None
-        if not self.bold_font:
-            try:
-                self.bold_font = ImageFont.truetype("arialbd.ttf", self.font_size)
-            except Exception:
-                self.bold_font = None
-        if not self.name_font:
-            try:
-                self.name_font = ImageFont.truetype("arial.ttf", self.name_font_size)
-            except Exception:
-                self.name_font = None
-        if not self.name_bold_font:
-            try:
-                self.name_bold_font = ImageFont.truetype("arialbd.ttf", self.name_font_size)
-            except Exception:
-                self.name_bold_font = None
-        if not self.title_font:
-            try:
-                self.title_font = ImageFont.truetype("arialbd.ttf", self.title_font_size)
-            except Exception:
-                self.title_font = None
-        if not self.subtitle_font:
-            try:
-                self.subtitle_font = ImageFont.truetype("arial.ttf", self.subtitle_font_size)
-            except Exception:
-                self.subtitle_font = None
-        if not self.score_font:
-            try:
-                self.score_font = ImageFont.truetype("arial.ttf", self.score_font_size)
-            except Exception:
-                self.score_font = None
-
-        # Фолбэк DejaVuSans
-        if not self.font:
-            try:
-                self.font = ImageFont.truetype("DejaVuSans.ttf", self.font_size)
-            except Exception:
-                self.font = None
-        if not self.bold_font:
-            try:
-                self.bold_font = ImageFont.truetype("DejaVuSans-Bold.ttf", self.font_size)
-            except Exception:
-                self.bold_font = None
-        if not self.name_font:
-            try:
-                self.name_font = ImageFont.truetype("DejaVuSans.ttf", self.name_font_size)
-            except Exception:
-                self.name_font = None
-        if not self.name_bold_font:
-            try:
-                self.name_bold_font = ImageFont.truetype("DejaVuSans-Bold.ttf", self.name_font_size)
-            except Exception:
-                self.name_bold_font = None
-        if not self.title_font:
-            try:
-                self.title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", self.title_font_size)
-            except Exception:
-                self.title_font = None
-        if not self.subtitle_font:
-            try:
-                self.subtitle_font = ImageFont.truetype("DejaVuSans.ttf", self.subtitle_font_size)
-            except Exception:
-                self.subtitle_font = None
-        if not self.score_font:
-            try:
-                self.score_font = ImageFont.truetype("DejaVuSans.ttf", self.score_font_size)
-            except Exception:
-                self.score_font = None
-
-        # Последний фолбэк — дефолтный
-        if not self.font:
-            try:
-                self.font = ImageFont.load_default()
-            except Exception:
-                self.font = None
-        if not self.bold_font:
-            try:
-                self.bold_font = ImageFont.load_default()
-            except Exception:
-                self.bold_font = None
-        if not self.name_font:
-            try:
-                self.name_font = ImageFont.load_default()
-            except Exception:
-                self.name_font = None
-        if not self.name_bold_font:
-            try:
-                self.name_bold_font = ImageFont.load_default()
-            except Exception:
-                self.name_bold_font = None
-        if not self.title_font:
-            try:
-                self.title_font = ImageFont.load_default()
-            except Exception:
-                self.title_font = None
-        if not self.subtitle_font:
-            try:
-                self.subtitle_font = ImageFont.load_default()
-            except Exception:
-                self.subtitle_font = None
-        if not self.score_font:
-            try:
-                self.score_font = ImageFont.load_default()
-            except Exception:
-                self.score_font = None
+        self.font = load_font(self.font_size, bold=False)
+        self.bold_font = load_font(self.font_size, bold=True)
+        self.name_font = load_font(self.name_font_size, bold=False)
+        self.name_bold_font = load_font(self.name_font_size, bold=True)
+        self.title_font = load_font(self.title_font_size, bold=True)
+        self.subtitle_font = load_font(self.subtitle_font_size, bold=False)
+        self.score_font = load_font(self.score_font_size, bold=False)
 
         # Нормализация отступов и длин линий относительно ширины ячейки
         # Чтобы горизонтальные соединительные линии были длиной ровно в ширину ячейки,

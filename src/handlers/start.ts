@@ -24,7 +24,12 @@ export async function handleStartPayload(ctx: AppContext, payload?: string | nul
     const targetId = Number(payload.replace('profile_', ''));
     const profile = await storage.getUser(targetId);
     if (profile) {
-      await showProfile(ctx, profile);
+      // По ссылке — без «Назад» (нет списка, откуда возвращаться)
+      await showProfile(ctx, profile, {
+        isOwn: targetId === userId,
+        mode: 'new',
+        reopenPayload: `deeplink_profile_${targetId}`,
+      });
       return;
     }
   }

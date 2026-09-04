@@ -74,6 +74,17 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
     ]);
   });
 
+  bot.action(/^deeplink_profile_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const targetId = Number(getCallbackPayload(ctx).replace('deeplink_profile_', ''));
+    const profile = await storage.getUser(targetId);
+    if (!profile) return;
+    await showProfile(ctx, profile, {
+      isOwn: targetId === getCtxUserId(ctx),
+      reopenPayload: `deeplink_profile_${targetId}`,
+    });
+  });
+
   bot.action(/^partner_show_profile_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const targetId = Number(getCallbackPayload(ctx).replace('partner_show_profile_', ''));

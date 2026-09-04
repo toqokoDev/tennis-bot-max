@@ -3,7 +3,7 @@ import os
 from typing import List, Dict, Any, Optional
 from PIL import Image, ImageDraw, ImageFont
 
-from .paths import GAMES_PHOTOS_DIR, BASE_DIR, FONTS_DIR
+from .paths import GAMES_PHOTOS_DIR, BASE_DIR
 from .models import Player, Match, TournamentBracket
 from .renderer import BracketImageGenerator
 
@@ -667,50 +667,13 @@ def _build_olympic_rounds_from_tournament(
 
 def create_simple_text_image_bytes(text: str, title: str = "Информация") -> bytes:
     """Создает простое изображение с заголовком и текстом и возвращает его как bytes (PNG)."""
+    from .fonts import load_font
+
     image = Image.new('RGB', (1000, 500), (255, 255, 255))
     draw = ImageDraw.Draw(image)
-    
-    # Загружаем шрифты с приоритетом Circe (как в круговой таблице)
-    def _try_font(paths, size):
-        for p in paths:
-            try:
-                return ImageFont.truetype(p, size)
-            except Exception:
-                continue
-        return None
-    
-    circe_bold = [
-        "Circe-Bold.ttf",
-        os.path.join(str(FONTS_DIR), "Circe-Bold.ttf"),
-    ]
-    circe_regular = [
-        "Circe-Regular.ttf",
-        "Circe.ttf",
-        os.path.join(str(FONTS_DIR), "Circe-Regular.ttf"),
-        os.path.join(str(FONTS_DIR), "Circe.ttf"),
-    ]
-    
-    # Пытаемся Circe для заголовка (жирный, размер 18)
-    title_font = _try_font(circe_bold, 18)
-    if not title_font:
-        try:
-            title_font = ImageFont.truetype("arialbd.ttf", 18)
-        except Exception:
-            try:
-                title_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 18)
-            except Exception:
-                title_font = ImageFont.load_default()
-    
-    # Обычный шрифт для текста (размер 18)
-    text_font = _try_font(circe_regular, 18)
-    if not text_font:
-        try:
-            text_font = ImageFont.truetype("arial.ttf", 18)
-        except Exception:
-            try:
-                text_font = ImageFont.truetype("DejaVuSans.ttf", 18)
-            except Exception:
-                text_font = ImageFont.load_default()
+
+    title_font = load_font(22, bold=True)
+    text_font = load_font(18, bold=False)
 
     # Заголовок с отступом сверху
     padding = 20
@@ -719,22 +682,13 @@ def create_simple_text_image_bytes(text: str, title: str = "Информация
         title_width = title_bbox[2] - title_bbox[0]
         draw.text(((1000 - title_width) // 2, padding), title, fill=(31, 41, 55), font=title_font)
     except Exception:
-        try:
-            draw.text((padding, padding), title, fill=(31, 41, 55), font=title_font)
-        except Exception:
-            # В крайнем случае удаляем не-ASCII символы
-            safe_title = title.encode('ascii', 'ignore').decode('ascii')
-            draw.text((padding, padding), safe_title, fill=(31, 41, 55), font=title_font)
+        draw.text((padding, padding), title, fill=(31, 41, 55), font=title_font)
 
     # Текст с переносами строк (увеличенные отступы)
     y = padding + 50
     line_spacing = 24
     for line in str(text or "").splitlines() or [""]:
-        try:
-            draw.text((30, y), line, fill=(31, 41, 55), font=text_font)
-        except Exception:
-            safe_line = str(line).encode('ascii', 'ignore').decode('ascii')
-            draw.text((30, y), safe_line, fill=(31, 41, 55), font=text_font)
+        draw.text((30, y), line, fill=(31, 41, 55), font=text_font)
         y += line_spacing
 
     buf = io.BytesIO()
