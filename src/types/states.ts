@@ -191,9 +191,12 @@ export enum CreateTournamentStates {
 export enum ViewTournamentsStates {
   SPORT = 'SPORT',
   COUNTRY = 'COUNTRY',
+  COUNTRY_INPUT = 'TOURNAMENT_COUNTRY_INPUT',
   CITY = 'CITY',
+  CITY_INPUT = 'TOURNAMENT_CITY_INPUT',
   DISTRICT = 'DISTRICT',
   GENDER = 'GENDER',
   TYPE = 'TYPE',
   LIST = 'LIST',
+  PROPOSED = 'PROPOSED',
 }

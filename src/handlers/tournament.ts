@@ -3,17 +3,17 @@ import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getMessageText, getCtxUserId } from '../context.js';
 import { env, isAdmin } from '../config/env.js';
+import { COUNTRIES } from '../config/profile.js';
 import {
-  COUNTRIES,
-  SPORTS,
-} from '../config/profile.js';
-import {
-  TOURNAMENT_AGE_GROUPS,
   TOURNAMENT_CATEGORIES,
-  TOURNAMENT_GENDERS,
-  TOURNAMENT_LEVELS,
+  TOURNAMENT_GENDER_BUTTONS,
   TOURNAMENT_TYPES,
+  TOURNAMENT_SPORT_ROWS,
+  DISTRICTS_MOSCOW,
+  MIN_PARTICIPANTS,
   generateTournamentName,
+  autoCategoryAndAge,
+  isLevelMatch,
 } from '../config/tournament.js';
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState, getPrevMessageId, setPrevMessageId } from '../middleware/session.js';
@@ -22,7 +22,7 @@ import {
   TournamentPaymentStates,
   ViewTournamentsStates,
 } from '../types/states.js';
-import type { SportType, Tournament } from '../types/models.js';
+import type { SportType, Tournament, UserProfile } from '../types/models.js';
 import { chunkButtons, showCurrentMessage, askText, backButton } from '../utils/bot.js';
 import {
   addParticipant,
@@ -42,11 +42,40 @@ import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 import { isValidEmail } from '../utils/validation.js';
 
-type ViewData = Partial<Tournament> & {
+type ProposedTournament = {
+  sport: SportType;
+  country: string;
+  city: string;
+  district?: string;
+  type: Tournament['type'];
+  gender: string;
+  category: string;
+  level: string;
+  age_group: 'Взрослые' | 'Дети';
+  duration: string;
+  participants_count: number;
+  show_in_list: boolean;
+  hide_bracket: boolean;
+  comment: string;
+};
+
+type ViewData = {
+  sport?: SportType;
+  country?: string;
+  city?: string;
+  district?: string;
+  gender?: string;
+  category?: string;
+  age_group?: 'Взрослые' | 'Дети';
+  duration?: string;
+  playerLevel?: string;
+  levelRange?: string | null;
+  proposed?: ProposedTournament;
   page?: number;
   listMode?: 'browse' | 'my';
   tournamentIds?: string[];
 };
+
 type CreateData = Partial<Tournament>;
 type TourPayData = {
   tournament_id?: string;
@@ -65,17 +94,61 @@ type CardNav = {
 
 type CardShowOptions = {
   mode?: 'new' | 'edit';
-  /** If false, do not regenerate/upload bracket image (safer for editMessage). */
   withImage?: boolean;
 };
+
+type Btn = ReturnType<typeof Keyboard.button.callback>;
+
+function mainMenuRow(): Btn[] {
+  return [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')];
+}
+
+function withMainMenu(rows: Btn[][]): Btn[][] {
+  return [...rows, mainMenuRow()];
+}
+
+function tournamentSportKeyboard(prefix: string): Btn[][] {
+  return withMainMenu(
+    TOURNAMENT_SPORT_ROWS.map((row) =>
+      row.map((s) => Keyboard.button.callback(s, `${prefix}${encodeURIComponent(s)}`)),
+    ),
+  );
+}
+
+function orderedCountries(): string[] {
+  const keys = Object.keys(COUNTRIES);
+  return ['🇷🇺 Россия', ...keys.filter((c) => c !== '🇷🇺 Россия')];
+}
+
+function genderKeyboard(prefix: string): Btn[][] {
+  const rows = chunkButtons(
+    TOURNAMENT_GENDER_BUTTONS,
+    (g) => Keyboard.button.callback(g.label, `${prefix}${encodeURIComponent(g.value)}`),
+    2,
+  );
+  return withMainMenu(rows);
+}
+
+function removeCountryFlag(country: string): string {
+  return country.replace(/^[^\p{L}\p{N}]+/u, '').trim() || country;
+}
 
 function filterBrowseTournaments(all: Record<string, Tournament>, data: ViewData): Tournament[] {
   return Object.values(all)
     .filter((t) => {
       if (!t.show_in_list || t.status === 'cancelled') return false;
+      if (t.status !== 'active' && t.status !== 'started') return false;
       if (data.sport && t.sport !== data.sport) return false;
       if (data.country && t.country !== data.country) return false;
       if (data.city && t.city !== data.city) return false;
+      if (data.city === 'Москва' && data.district) {
+        if ((t.district || '') !== data.district) return false;
+      }
+      if (data.gender && t.gender !== data.gender) return false;
+      if (data.category && t.category !== data.category) return false;
+      if (data.age_group && t.age_group !== data.age_group) return false;
+      if (data.duration && (t.duration || data.duration) !== data.duration) return false;
+      if (!isLevelMatch(data.playerLevel, t.level)) return false;
       return true;
     })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -92,9 +165,36 @@ async function resolveTournamentList(ctx: AppContext, data: ViewData): Promise<T
   return filterBrowseTournaments(all, data);
 }
 
+async function getOtherCountriesFromTournaments(sport?: SportType): Promise<string[]> {
+  const all = await storage.getTournaments();
+  const known = new Set(Object.keys(COUNTRIES));
+  const found = new Set<string>();
+  for (const t of Object.values(all)) {
+    if (sport && t.sport !== sport) continue;
+    if (t.status !== 'active' && t.status !== 'started') continue;
+    if (t.country && !known.has(t.country)) found.add(t.country);
+  }
+  return [...found].sort().slice(0, 5);
+}
+
+async function getOtherCitiesFromTournaments(sport?: SportType, country?: string): Promise<string[]> {
+  const all = await storage.getTournaments();
+  const known = new Set(COUNTRIES[country ?? ''] ?? []);
+  const found = new Set<string>();
+  for (const t of Object.values(all)) {
+    if (sport && t.sport !== sport) continue;
+    if (country && t.country !== country) continue;
+    if (t.status !== 'active' && t.status !== 'started') continue;
+    if (t.city && !known.has(t.city)) found.add(t.city);
+  }
+  return [...found].sort().slice(0, 5);
+}
+
 export async function showTournamentMenu(ctx: AppContext): Promise<void> {
   const user = await requireRegistered(ctx);
   if (!user) return;
+  const all = await storage.getTournaments();
+  const activeCount = Object.values(all).filter((t) => t.status === 'active' || t.status === 'started').length;
   const buttons = [
     [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
     [Keyboard.button.callback(TXT.tournament.my, 'tournament_my')],
@@ -102,8 +202,226 @@ export async function showTournamentMenu(ctx: AppContext): Promise<void> {
   if (isAdmin(user.max_user_id)) {
     buttons.push([Keyboard.button.callback(TXT.tournament.create, 'create_tournament')]);
   }
-  buttons.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
-  await showCurrentMessage(ctx, TXT.tournament.menu, {
+  buttons.push(mainMenuRow());
+  await showCurrentMessage(ctx, fmt(TXT.tournament.menu, { active_count: activeCount }), {
+    attachments: [Keyboard.inlineKeyboard(buttons)],
+  });
+}
+
+async function showBrowseSport(ctx: AppContext): Promise<void> {
+  await setState(ctx, ViewTournamentsStates.SPORT, {});
+  await showCurrentMessage(ctx, TXT.tournament.step1, {
+    attachments: [Keyboard.inlineKeyboard(tournamentSportKeyboard('tviewsport_'))],
+  });
+}
+
+async function showBrowseCountry(ctx: AppContext, data: ViewData): Promise<void> {
+  await setState(ctx, ViewTournamentsStates.COUNTRY, data);
+  const rows = chunkButtons(
+    orderedCountries(),
+    (c) => Keyboard.button.callback(c, `tviewcountry_${encodeURIComponent(c)}`),
+    2,
+  );
+  rows.push([Keyboard.button.callback(TXT.tournament.other_country, 'tviewcountry_other')]);
+  await showCurrentMessage(ctx, fmt(TXT.tournament.step2, { sport: data.sport! }), {
+    attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
+  });
+}
+
+async function showBrowseCity(ctx: AppContext, data: ViewData): Promise<void> {
+  await setState(ctx, ViewTournamentsStates.CITY_INPUT, data);
+  const cities = COUNTRIES[data.country!] ?? [];
+  const otherCities = await getOtherCitiesFromTournaments(data.sport, data.country);
+  const rows = chunkButtons(
+    cities,
+    (c) => Keyboard.button.callback(c, `tviewcity_${encodeURIComponent(c)}`),
+    2,
+  );
+  for (const city of otherCities) {
+    if (!cities.includes(city)) {
+      rows.push([Keyboard.button.callback(`📍 ${city}`, `tviewcity_${encodeURIComponent(city)}`)]);
+    }
+  }
+  rows.push([Keyboard.button.callback(TXT.common.back, 'tournament_list')]);
+  await showCurrentMessage(ctx, fmt(TXT.tournament.step3, {
+    sport: data.sport!,
+    country: data.country!,
+  }), {
+    attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
+  });
+}
+
+async function showBrowseDistrict(ctx: AppContext, data: ViewData): Promise<void> {
+  await setState(ctx, ViewTournamentsStates.DISTRICT, data);
+  const rows = chunkButtons(
+    [...DISTRICTS_MOSCOW],
+    (d) => Keyboard.button.callback(d, `tviewdistrict_${encodeURIComponent(d)}`),
+    2,
+  );
+  await showCurrentMessage(ctx, fmt(TXT.tournament.step4_district, {
+    sport: data.sport!,
+    country: data.country!,
+    city: data.city!,
+  }), {
+    attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
+  });
+}
+
+async function showBrowseGender(ctx: AppContext, data: ViewData): Promise<void> {
+  await setState(ctx, ViewTournamentsStates.GENDER, data);
+  const text = data.district
+    ? fmt(TXT.tournament.step5_gender, {
+      sport: data.sport!,
+      country: data.country!,
+      city: data.city!,
+      district: data.district,
+    })
+    : fmt(TXT.tournament.step4_gender, {
+      sport: data.sport!,
+      country: data.country!,
+      city: data.city!,
+    });
+  await showCurrentMessage(ctx, text, {
+    attachments: [Keyboard.inlineKeyboard(genderKeyboard('tviewgender_'))],
+  });
+}
+
+async function continueAfterGender(ctx: AppContext, data: ViewData, user: UserProfile): Promise<void> {
+  const { category, ageGroup, playerLevel, levelRange } = autoCategoryAndAge(user);
+  data.category = category;
+  data.age_group = ageGroup;
+  data.playerLevel = playerLevel;
+  data.levelRange = levelRange;
+  data.duration = 'Многодневные';
+  data.page = 0;
+  data.listMode = 'browse';
+
+  const list = filterBrowseTournaments(await storage.getTournaments(), data);
+  if (!list.length) {
+    const proposed: ProposedTournament = {
+      sport: data.sport!,
+      country: data.country!,
+      city: data.city!,
+      district: data.city === 'Москва' ? data.district : undefined,
+      type: 'Круговая',
+      gender: data.gender!,
+      category,
+      level: levelRange || 'Не указан',
+      age_group: ageGroup,
+      duration: 'Многодневные',
+      participants_count: MIN_PARTICIPANTS['Круговая'] ?? 4,
+      show_in_list: true,
+      hide_bracket: false,
+      comment: '',
+    };
+    data.proposed = proposed;
+    await setState(ctx, ViewTournamentsStates.PROPOSED, data);
+
+    const all = await storage.getTournaments();
+    const name = generateTournamentName({
+      city: proposed.city,
+      country: proposed.country,
+      district: proposed.district,
+      level: proposed.level,
+      gender: proposed.gender,
+      number: Object.keys(all).length + 1,
+    });
+    const location = proposed.district
+      ? `${proposed.city} (${proposed.district}), ${removeCountryFlag(proposed.country)}`
+      : `${proposed.city}, ${removeCountryFlag(proposed.country)}`;
+
+    await showCurrentMessage(ctx, fmt(TXT.tournament.proposed_preview, {
+      name,
+      location,
+      type: proposed.type,
+      gender: proposed.gender,
+      category: proposed.category,
+      age_group: proposed.age_group,
+      duration: proposed.duration,
+      count: proposed.participants_count,
+    }), {
+      attachments: [Keyboard.inlineKeyboard(withMainMenu([
+        [Keyboard.button.callback(TXT.tournament.join, 'apply_proposed_tournament')],
+      ]))],
+    });
+    return;
+  }
+
+  await showTournamentList(ctx, data);
+}
+
+async function applyProposedTournament(ctx: AppContext): Promise<void> {
+  const user = await requireRegistered(ctx);
+  if (!user) return;
+  const data = getStateData<ViewData>(ctx);
+  const base = data.proposed;
+  if (!base) {
+    await showCurrentMessage(ctx, TXT.tournament.proposed_missing, {
+      attachments: [Keyboard.inlineKeyboard(withMainMenu([
+        [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
+      ]))],
+    });
+    return;
+  }
+
+  const all = await storage.getTournaments();
+  const number = Object.keys(all).length + 1;
+  const name = generateTournamentName({
+    city: base.city,
+    country: base.country,
+    district: base.district,
+    level: base.level,
+    gender: base.gender,
+    number,
+  });
+  const id = `t_${Date.now()}`;
+  let tourn: Tournament = {
+    id,
+    name,
+    sport: base.sport,
+    country: base.country,
+    city: base.city,
+    district: base.district,
+    type: base.type,
+    gender: base.gender,
+    category: base.category,
+    level: base.level,
+    age_group: base.age_group,
+    duration: base.duration,
+    participants_count: base.participants_count,
+    participants: {},
+    show_in_list: base.show_in_list,
+    hide_bracket: base.hide_bracket,
+    comment: base.comment,
+    status: 'active',
+    entry_fee: env.TOURNAMENT_ENTRY_FEE,
+    payments: {},
+    created_by: String(user.max_user_id),
+    created_at: new Date().toISOString(),
+  };
+  tourn = addParticipant(tourn, user.max_user_id, `${user.first_name} ${user.last_name}`);
+  if (shouldOpenPaymentWindow(tourn)) tourn = openPaymentWindow(tourn);
+  await storage.saveTournament(tourn);
+  await sendTournamentCreatedToChannel(ctx.api, tourn);
+  await sendTournamentApplicationToChannel(ctx.api, tourn, user);
+
+  data.proposed = undefined;
+  data.listMode = 'my';
+  await setState(ctx, ViewTournamentsStates.LIST, data);
+
+  const count = Object.keys(tourn.participants).length;
+  const buttons: Btn[][] = [];
+  if (tourn.entry_fee > 0) {
+    buttons.push([Keyboard.button.callback(TXT.tournament.pay, `pay_tournament:${tourn.id}`)]);
+  }
+  buttons.push([Keyboard.button.callback(TXT.tournament.all_tournaments, 'tournament_list')]);
+  buttons.push(mainMenuRow());
+
+  await showCurrentMessage(ctx, fmt(TXT.tournament.applied_success, {
+    name: tourn.name,
+    current: count,
+    total: tourn.participants_count,
+  }), {
     attachments: [Keyboard.inlineKeyboard(buttons)],
   });
 }
@@ -118,10 +436,9 @@ async function showMyTournaments(
   const list = await resolveTournamentList(ctx, { listMode: 'my' });
   if (!list.length) {
     await showCurrentMessage(ctx, TXT.tournament.my_empty, {
-      attachments: [Keyboard.inlineKeyboard([
+      attachments: [Keyboard.inlineKeyboard(withMainMenu([
         [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
-        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-      ])],
+      ]))],
     }, opts.mode ?? 'edit');
     return;
   }
@@ -286,10 +603,39 @@ export async function handleTournamentPaymentMessage(ctx: AppContext): Promise<b
     attachments: [Keyboard.inlineKeyboard([
       [Keyboard.button.link(TXT.payments.continue_pay, payment.paymentUrl)],
       [Keyboard.button.callback(TXT.payments.confirm_pay, `tournament_pay_confirm:${data.tournament_id}`)],
-      [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+      mainMenuRow(),
     ])],
   });
   return true;
+}
+
+export async function handleTournamentBrowseMessage(ctx: AppContext): Promise<boolean> {
+  const state = getState(ctx);
+  const text = (getMessageText(ctx) || '').trim();
+  if (!text) return false;
+
+  if (state === ViewTournamentsStates.COUNTRY_INPUT) {
+    const data = getStateData<ViewData>(ctx);
+    data.country = text;
+    data.city = undefined;
+    data.district = undefined;
+    await showBrowseCity(ctx, data);
+    return true;
+  }
+
+  if (state === ViewTournamentsStates.CITY_INPUT) {
+    const data = getStateData<ViewData>(ctx);
+    data.city = text;
+    data.district = undefined;
+    if (text === 'Москва') {
+      await showBrowseDistrict(ctx, data);
+    } else {
+      await showBrowseGender(ctx, data);
+    }
+    return true;
+  }
+
+  return false;
 }
 
 async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): Promise<void> {
@@ -356,7 +702,7 @@ async function showTournamentCard(
   }
 
   const paid = tourn.payments[String(userId)]?.status === 'succeeded';
-  const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
+  const buttons: Btn[][] = [];
 
   if (nav && nav.total > 1) {
     const prefix = nav.listMode === 'my' ? 'tmy_page' : 'tview_page';
@@ -385,7 +731,7 @@ async function showTournamentCard(
   } else {
     buttons.push([Keyboard.button.callback(TXT.tournament.list, 'tournament_list')]);
   }
-  buttons.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
+  buttons.push(mainMenuRow());
 
   const keyboard = Keyboard.inlineKeyboard(buttons);
   let bracketImage: import('@maxhub/max-bot-api/types').AttachmentRequest | null = null;
@@ -407,7 +753,6 @@ async function showTournamentCard(
     return;
   }
 
-  // Edit in place — do not fall back to a new message
   const targetId = (ctx.callback && ctx.messageId) ? ctx.messageId : getPrevMessageId(ctx);
   if (!targetId) {
     await showCurrentMessage(ctx, text, { attachments }, 'new');
@@ -435,10 +780,9 @@ async function showTournamentList(
   const list = filterBrowseTournaments(await storage.getTournaments(), data);
   if (!list.length) {
     await showCurrentMessage(ctx, TXT.tournament.no_list, {
-      attachments: [Keyboard.inlineKeyboard([
+      attachments: [Keyboard.inlineKeyboard(withMainMenu([
         [Keyboard.button.callback(TXT.common.back, 'tournament_list')],
-        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-      ])],
+      ]))],
     }, opts.mode ?? 'edit');
     return;
   }
@@ -456,20 +800,22 @@ async function showTournamentList(
 }
 
 async function finalizeTournamentCreate(ctx: AppContext, data: CreateData): Promise<void> {
-  data.level = data.level ?? TOURNAMENT_LEVELS[2];
-  data.age_group = data.age_group ?? TOURNAMENT_AGE_GROUPS[0];
-  data.duration = data.duration ?? new Date().toLocaleDateString('ru-RU');
+  data.level = data.level ?? '3.5-4.5';
+  data.age_group = data.age_group ?? 'Взрослые';
+  data.duration = data.duration ?? 'Многодневные';
   data.participants_count = data.participants_count ?? 8;
   data.show_in_list = data.show_in_list ?? true;
   data.hide_bracket = data.hide_bracket ?? false;
   data.entry_fee = data.entry_fee ?? env.TOURNAMENT_ENTRY_FEE;
   data.comment = data.comment ?? '';
+  const all = await storage.getTournaments();
   data.name = generateTournamentName({
-    sport: data.sport!,
     city: data.city!,
+    country: data.country!,
+    district: data.district,
     level: data.level!,
     gender: data.gender,
-    date: data.duration!,
+    number: Object.keys(all).length + 1,
   });
   const id = `t_${Date.now()}`;
   const tourn: Tournament = {
@@ -478,6 +824,7 @@ async function finalizeTournamentCreate(ctx: AppContext, data: CreateData): Prom
     sport: data.sport!,
     country: data.country!,
     city: data.city!,
+    district: data.district,
     type: data.type!,
     gender: data.gender,
     category: data.category!,
@@ -497,18 +844,15 @@ async function finalizeTournamentCreate(ctx: AppContext, data: CreateData): Prom
   await storage.saveTournament(tourn);
   await sendTournamentCreatedToChannel(ctx.api, tourn);
   await clearState(ctx);
-  await ctx.reply(fmt(TXT.tournament.create_done, { name: tourn.name }));
+  await ctx.reply(fmt(TXT.tournament.create_done, { name: tourn.name }), {
+    attachments: [Keyboard.inlineKeyboard([mainMenuRow()])],
+  });
 }
 
 export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
   bot.action('tournament_list', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    await setState(ctx, ViewTournamentsStates.SPORT, {});
-    await showCurrentMessage(ctx, TXT.tournament.choose_sport, {
-      attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `tviewsport_${encodeURIComponent(s)}`), 2),
-      )],
-    });
+    await showBrowseSport(ctx);
   });
 
   bot.action('tournament_my', async (ctx) => {
@@ -520,35 +864,67 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<ViewData>(ctx);
     data.sport = decodeURIComponent(getCallbackPayload(ctx).replace('tviewsport_', '')) as SportType;
-    await setState(ctx, ViewTournamentsStates.COUNTRY, data);
-    await showCurrentMessage(ctx, TXT.tournament.choose_country, {
-      attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(Object.keys(COUNTRIES), (c) => Keyboard.button.callback(c, `tviewcountry_${encodeURIComponent(c)}`), 2),
-      )],
+    await showBrowseCountry(ctx, data);
+  });
+
+  bot.action('tviewcountry_other', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const data = getStateData<ViewData>(ctx);
+    await setState(ctx, ViewTournamentsStates.COUNTRY_INPUT, data);
+    const others = await getOtherCountriesFromTournaments(data.sport);
+    const rows = chunkButtons(
+      others,
+      (c) => Keyboard.button.callback(c, `tviewcountry_${encodeURIComponent(c)}`),
+      2,
+    );
+    rows.push([Keyboard.button.callback(TXT.common.back, 'tournament_list')]);
+    await showCurrentMessage(ctx, fmt(TXT.tournament.step2_enter, { sport: data.sport! }), {
+      attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
     });
   });
 
   bot.action(/^tviewcountry_/, async (ctx) => {
+    const payload = getCallbackPayload(ctx);
+    if (payload === 'tviewcountry_other') return;
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<ViewData>(ctx);
-    data.country = decodeURIComponent(getCallbackPayload(ctx).replace('tviewcountry_', ''));
-    await setState(ctx, ViewTournamentsStates.CITY, data);
-    const cities = COUNTRIES[data.country!] ?? [];
-    await showCurrentMessage(ctx, fmt(TXT.tournament.choose_city, { country: data.country! }), {
-      attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(cities, (c) => Keyboard.button.callback(c, `tviewcity_${encodeURIComponent(c)}`), 2),
-      )],
-    });
+    data.country = decodeURIComponent(payload.replace('tviewcountry_', ''));
+    data.city = undefined;
+    data.district = undefined;
+    await showBrowseCity(ctx, data);
   });
 
   bot.action(/^tviewcity_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<ViewData>(ctx);
     data.city = decodeURIComponent(getCallbackPayload(ctx).replace('tviewcity_', ''));
-    data.page = 0;
-    data.listMode = 'browse';
-    await setState(ctx, ViewTournamentsStates.LIST, data);
-    await showTournamentList(ctx, data);
+    data.district = undefined;
+    if (data.city === 'Москва') {
+      await showBrowseDistrict(ctx, data);
+    } else {
+      await showBrowseGender(ctx, data);
+    }
+  });
+
+  bot.action(/^tviewdistrict_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const data = getStateData<ViewData>(ctx);
+    data.district = decodeURIComponent(getCallbackPayload(ctx).replace('tviewdistrict_', ''));
+    await showBrowseGender(ctx, data);
+  });
+
+  bot.action(/^tviewgender_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const user = await requireRegistered(ctx);
+    if (!user) return;
+    const data = getStateData<ViewData>(ctx);
+    data.gender = decodeURIComponent(getCallbackPayload(ctx).replace('tviewgender_', ''));
+    await continueAfterGender(ctx, data, user);
+  });
+
+  bot.action('apply_proposed_tournament', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    await applyProposedTournament(ctx);
   });
 
   bot.action(/^tview_page:/, async (ctx) => {
@@ -595,10 +971,9 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
       const list = await resolveTournamentList(ctx, { listMode: 'my' });
       if (!list.length) {
         await showCurrentMessage(ctx, TXT.tournament.my_empty, {
-          attachments: [Keyboard.inlineKeyboard([
+          attachments: [Keyboard.inlineKeyboard(withMainMenu([
             [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
-            [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-          ])],
+          ]))],
         }, 'edit');
         return;
       }
@@ -663,9 +1038,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     if (!isAdmin(getCtxUserId(ctx))) return;
     await setState(ctx, CreateTournamentStates.SPORT, {});
     await showCurrentMessage(ctx, TXT.tournament.choose_sport, {
-      attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `tcsport_${encodeURIComponent(s)}`), 2),
-      )],
+      attachments: [Keyboard.inlineKeyboard(tournamentSportKeyboard('tcsport_'))],
     });
   });
 
@@ -675,9 +1048,9 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     data.sport = decodeURIComponent(getCallbackPayload(ctx).replace('tcsport_', '')) as SportType;
     await setState(ctx, CreateTournamentStates.COUNTRY, data);
     await showCurrentMessage(ctx, TXT.tournament.choose_country, {
-      attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(Object.keys(COUNTRIES), (c) => Keyboard.button.callback(c, `tccountry_${encodeURIComponent(c)}`), 2),
-      )],
+      attachments: [Keyboard.inlineKeyboard(withMainMenu(
+        chunkButtons(orderedCountries(), (c) => Keyboard.button.callback(c, `tccountry_${encodeURIComponent(c)}`), 2),
+      ))],
     });
   });
 
@@ -688,9 +1061,9 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await setState(ctx, CreateTournamentStates.CITY, data);
     const cities = COUNTRIES[data.country!] ?? [];
     await showCurrentMessage(ctx, fmt(TXT.tournament.choose_city, { country: data.country! }), {
-      attachments: [Keyboard.inlineKeyboard(
+      attachments: [Keyboard.inlineKeyboard(withMainMenu(
         chunkButtons(cities, (c) => Keyboard.button.callback(c, `tccity_${encodeURIComponent(c)}`), 2),
-      )],
+      ))],
     });
   });
 
@@ -698,11 +1071,36 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<CreateData>(ctx);
     data.city = decodeURIComponent(getCallbackPayload(ctx).replace('tccity_', ''));
+    if (data.city === 'Москва') {
+      await setState(ctx, CreateTournamentStates.DISTRICT, data);
+      await showCurrentMessage(ctx, fmt(TXT.tournament.step4_district, {
+        sport: data.sport!,
+        country: data.country!,
+        city: data.city!,
+      }), {
+        attachments: [Keyboard.inlineKeyboard(withMainMenu(
+          chunkButtons([...DISTRICTS_MOSCOW], (d) => Keyboard.button.callback(d, `tcdistrict_${encodeURIComponent(d)}`), 2),
+        ))],
+      });
+      return;
+    }
     await setState(ctx, CreateTournamentStates.TYPE, data);
     await showCurrentMessage(ctx, TXT.tournament.create_type, {
-      attachments: [Keyboard.inlineKeyboard(
+      attachments: [Keyboard.inlineKeyboard(withMainMenu(
         TOURNAMENT_TYPES.map((tp) => [Keyboard.button.callback(tp, `tctype_${encodeURIComponent(tp)}`)]),
-      )],
+      ))],
+    });
+  });
+
+  bot.action(/^tcdistrict_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const data = getStateData<CreateData>(ctx);
+    data.district = decodeURIComponent(getCallbackPayload(ctx).replace('tcdistrict_', ''));
+    await setState(ctx, CreateTournamentStates.TYPE, data);
+    await showCurrentMessage(ctx, TXT.tournament.create_type, {
+      attachments: [Keyboard.inlineKeyboard(withMainMenu(
+        TOURNAMENT_TYPES.map((tp) => [Keyboard.button.callback(tp, `tctype_${encodeURIComponent(tp)}`)]),
+      ))],
     });
   });
 
@@ -712,9 +1110,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     data.type = decodeURIComponent(getCallbackPayload(ctx).replace('tctype_', '')) as Tournament['type'];
     await setState(ctx, CreateTournamentStates.GENDER, data);
     await showCurrentMessage(ctx, TXT.tournament.create_gender, {
-      attachments: [Keyboard.inlineKeyboard(
-        TOURNAMENT_GENDERS.map((g) => [Keyboard.button.callback(g, `tcgender_${encodeURIComponent(g)}`)]),
-      )],
+      attachments: [Keyboard.inlineKeyboard(genderKeyboard('tcgender_'))],
     });
   });
 
@@ -724,9 +1120,9 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     data.gender = decodeURIComponent(getCallbackPayload(ctx).replace('tcgender_', ''));
     await setState(ctx, CreateTournamentStates.CATEGORY, data);
     await showCurrentMessage(ctx, TXT.tournament.create_category, {
-      attachments: [Keyboard.inlineKeyboard(
-        TOURNAMENT_CATEGORIES.map((c) => [Keyboard.button.callback(c, `tccategory_${encodeURIComponent(c)}`)]),
-      )],
+      attachments: [Keyboard.inlineKeyboard(withMainMenu(
+        chunkButtons([...TOURNAMENT_CATEGORIES], (c) => Keyboard.button.callback(c, `tccategory_${encodeURIComponent(c)}`), 2),
+      ))],
     });
   });
 
@@ -737,7 +1133,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await setState(ctx, CreateTournamentStates.CONFIRM, data);
     const preview = [
       data.sport,
-      `${data.country}, ${data.city}`,
+      `${data.country}, ${data.city}${data.district ? ` (${data.district})` : ''}`,
       data.type,
       data.gender,
       data.category,
@@ -745,10 +1141,9 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
       TXT.tournament.create_participants,
     ].join('\n');
     await showCurrentMessage(ctx, fmt(TXT.tournament.create_confirm, { preview }), {
-      attachments: [Keyboard.inlineKeyboard([
+      attachments: [Keyboard.inlineKeyboard(withMainMenu([
         [Keyboard.button.callback('✅ Создать', 'tcconfirm_yes')],
-        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-      ])],
+      ]))],
     });
   });
 
