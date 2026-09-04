@@ -39,6 +39,7 @@ import {
   sendTournamentCreatedToChannel,
 } from '../services/channels.js';
 import { createTournamentPayment, checkPaymentStatus } from '../services/payments.js';
+import { notifyTournamentPayment } from '../services/email.js';
 import { uploadBracketImage } from '../services/bracketImage.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -190,6 +191,13 @@ async function getOtherCitiesFromTournaments(sport?: SportType, country?: string
     if (t.city && !known.has(t.city)) found.add(t.city);
   }
   return [...found].sort().slice(0, 5);
+}
+
+export async function startCreateTournament(ctx: AppContext): Promise<void> {
+  await setState(ctx, CreateTournamentStates.SPORT, {});
+  await showCurrentMessage(ctx, TXT.tournament.choose_sport, {
+    attachments: [Keyboard.inlineKeyboard(tournamentSportKeyboard('tcsport_'))],
+  });
 }
 
 export async function showTournamentMenu(ctx: AppContext): Promise<void> {
@@ -721,6 +729,10 @@ async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): 
     tourn.participants[String(userId)].paid = true;
   }
   await storage.saveTournament(tourn);
+  const profile = await storage.getUser(userId);
+  if (profile) {
+    await notifyTournamentPayment(profile, tourn, data.email);
+  }
   await clearState(ctx);
   await ctx.reply(TXT.tournament.payment_confirmed, { attachments: [backButton()] });
   await showTournamentCard(ctx, tourn);
@@ -1105,10 +1117,13 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
   bot.action('create_tournament', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     if (!isAdmin(getCtxUserId(ctx))) return;
-    await setState(ctx, CreateTournamentStates.SPORT, {});
-    await showCurrentMessage(ctx, TXT.tournament.choose_sport, {
-      attachments: [Keyboard.inlineKeyboard(tournamentSportKeyboard('tcsport_'))],
-    });
+    await startCreateTournament(ctx);
+  });
+
+  bot.action('admin_create_tournament', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    if (!isAdmin(getCtxUserId(ctx))) return;
+    await startCreateTournament(ctx);
   });
 
   bot.action(/^tcsport_/, async (ctx) => {

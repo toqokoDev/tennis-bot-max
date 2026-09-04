@@ -200,7 +200,7 @@ async function resolvePaymentAndActivate(ctx: AppContext): Promise<void> {
   };
   delete profile.pending_payment;
   await storage.saveUser(profile);
-  await notifySubscriptionPurchase(profile.max_user_id, until);
+  await notifySubscriptionPurchase(profile, until, email !== 'не указан' ? email : undefined);
   await clearState(ctx);
   await ctx.reply(fmt(TXT.payments.success, { until }), { attachments: [backButton()] });
 }

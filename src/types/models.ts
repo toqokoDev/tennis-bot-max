@@ -22,6 +22,8 @@ export type Gender = 'Мужской' | 'Женский';
 export interface SubscriptionInfo {
   active: boolean;
   until: string;
+  activated?: string;
+  email?: string;
   expired?: boolean;
   last_expired_notification?: string;
 }
@@ -110,8 +112,13 @@ export interface OfferResponse {
 }
 
 export interface BannedUser {
-  reason: string;
+  reason?: string;
   banned_at: string;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  phone?: string;
+  banned_by?: number;
 }
 
 export interface ParticipantInfo {

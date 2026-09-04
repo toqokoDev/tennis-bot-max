@@ -2,6 +2,7 @@ import { Keyboard } from '@maxhub/max-bot-api';
 import { TXT, fmt } from '../texts.js';
 import type { AppContext } from '../context.js';
 import { getCtxUserId, getMessageText } from '../context.js';
+import { isAdmin } from '../config/env.js';
 import {
   COUNTRIES,
   DATING_GOALS,
@@ -34,7 +35,56 @@ import {
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 
-type EditData = Record<string, unknown> & { dating_interests_keys?: string[] };
+type EditData = Record<string, unknown> & {
+  dating_interests_keys?: string[];
+  admin_edit_user_id?: number;
+  country?: string;
+  city?: string;
+};
+
+function getAdminEditTargetId(ctx: AppContext): number | undefined {
+  const id = getStateData<EditData>(ctx).admin_edit_user_id;
+  return typeof id === 'number' ? id : undefined;
+}
+
+async function resolveEditUser(ctx: AppContext): Promise<UserProfile | undefined> {
+  const adminTarget = getAdminEditTargetId(ctx);
+  if (adminTarget !== undefined) {
+    if (!isAdmin(getCtxUserId(ctx))) return undefined;
+    return storage.getUser(adminTarget);
+  }
+  return (await requireRegistered(ctx)) ?? undefined;
+}
+
+async function saveProfile(ctx: AppContext, profile: UserProfile): Promise<void> {
+  await storage.saveUser(profile);
+  if (profile.max_user_id === getCtxUserId(ctx)) {
+    ctx.profile = profile;
+  }
+}
+
+async function showAfterEdit(
+  ctx: AppContext,
+  profile: UserProfile,
+  mode: 'edit' | 'new' = 'edit',
+): Promise<void> {
+  const adminTarget = getAdminEditTargetId(ctx);
+  if (adminTarget !== undefined) {
+    await clearState(ctx);
+    await showProfile(ctx, profile, { isOwn: false, mode });
+    return;
+  }
+  await showOwnProfile(ctx, profile, mode);
+}
+
+function preserveAdminEditData(ctx: AppContext): number | undefined {
+  return getAdminEditTargetId(ctx);
+}
+
+function withAdminEditData(data: EditData, adminId?: number): EditData {
+  if (adminId !== undefined) return { ...data, admin_edit_user_id: adminId };
+  return data;
+}
 
 function getMessageImageUrl(ctx: AppContext): string | undefined {
   const attachments = ctx.message?.body.attachments;
@@ -101,17 +151,16 @@ export function buildEditProfileKeyboard(profile: UserProfile): ReturnType<typeo
 }
 
 export async function showEditProfileMenu(ctx: AppContext, profile: UserProfile): Promise<void> {
+  const adminId = preserveAdminEditData(ctx);
   await clearState(ctx);
+  if (adminId !== undefined) {
+    ctx.session.data = { admin_edit_user_id: adminId };
+  }
   const attachments: Parameters<typeof editButtons>[2] = [buildEditProfileKeyboard(profile)];
   if (profile.photo_path) {
     attachments.unshift({ type: 'image', payload: { url: profile.photo_path } });
   }
   await editButtons(ctx, `${formatProfileText(profile)}\n\n${TXT.profile.edit_menu}`, attachments);
-}
-
-async function saveProfile(ctx: AppContext, profile: UserProfile): Promise<void> {
-  await storage.saveUser(profile);
-  ctx.profile = profile;
 }
 
 export async function showOwnProfile(
@@ -162,13 +211,15 @@ async function saveLocationAndShowProfile(
   district?: string,
   mode: 'edit' | 'new' = 'edit',
 ): Promise<void> {
-  const user = await requireRegistered(ctx);
+  const user = await resolveEditUser(ctx);
   if (!user) return;
+  const adminId = preserveAdminEditData(ctx);
   user.country = country;
   user.city = city;
   user.district = district || undefined;
   await saveProfile(ctx, user);
-  await showOwnProfile(ctx, user, mode);
+  if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+  await showAfterEdit(ctx, user, mode);
 }
 
 export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean> {
@@ -177,27 +228,27 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
     return false;
   }
 
-  const userId = getCtxUserId(ctx);
-  const user = await storage.getUser(userId);
+  const user = await resolveEditUser(ctx);
   if (!user) {
     await clearState(ctx);
     return true;
   }
+  const adminId = preserveAdminEditData(ctx);
 
   const text = getMessageText(ctx);
 
   if (state === EditProfileStates.COMMENT && text) {
     user.profile_comment = text;
     await saveProfile(ctx, user);
-    await clearState(ctx);
-    await showOwnProfile(ctx, user, 'new');
+    if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+    await showAfterEdit(ctx, user, 'new');
     return true;
   }
 
   if (state === EditProfileStates.COUNTRY_INPUT && text) {
     const data = getStateData<EditData>(ctx);
     data.country = text;
-    await setState(ctx, EditProfileStates.CITY_INPUT, data);
+    await setState(ctx, EditProfileStates.CITY_INPUT, withAdminEditData(data, adminId));
     await askText(ctx, TXT.registration.enter_city);
     return true;
   }
@@ -216,8 +267,8 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
     }
     user.price = price;
     await saveProfile(ctx, user);
-    await clearState(ctx);
-    await showOwnProfile(ctx, user, 'new');
+    if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+    await showAfterEdit(ctx, user, 'new');
     return true;
   }
 
@@ -237,8 +288,8 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
     }
     user.rating_edited = true;
     await saveProfile(ctx, user);
-    await clearState(ctx);
-    await showOwnProfile(ctx, user, 'new');
+    if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+    await showAfterEdit(ctx, user, 'new');
     return true;
   }
 
@@ -249,16 +300,16 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
     }
     user.dating_additional = text === '/skip' ? '' : text;
     await saveProfile(ctx, user);
-    await clearState(ctx);
-    await showOwnProfile(ctx, user, 'new');
+    if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+    await showAfterEdit(ctx, user, 'new');
     return true;
   }
 
   if (state === EditProfileStates.MEETING_TIME && text) {
     user.meeting_time = text;
     await saveProfile(ctx, user);
-    await clearState(ctx);
-    await showOwnProfile(ctx, user, 'new');
+    if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+    await showAfterEdit(ctx, user, 'new');
     return true;
   }
 
@@ -270,8 +321,8 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
     }
     user.photo_path = url;
     await saveProfile(ctx, user);
-    await clearState(ctx);
-    await showOwnProfile(ctx, user, 'new');
+    if (adminId !== undefined) ctx.session.data.admin_edit_user_id = adminId;
+    await showAfterEdit(ctx, user, 'new');
     return true;
   }
 
@@ -281,16 +332,24 @@ export async function handleProfileEditMessage(ctx: AppContext): Promise<boolean
 export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
   bot.action('edit_profile', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
+    const adminId = getAdminEditTargetId(ctx);
+    if (adminId !== undefined && isAdmin(getCtxUserId(ctx))) {
+      const target = await storage.getUser(adminId);
+      if (!target) return;
+      await showEditProfileMenu(ctx, target);
+      return;
+    }
     const user = await requireRegistered(ctx);
     if (!user) return;
+    delete ctx.session.data.admin_edit_user_id;
     await showEditProfileMenu(ctx, user);
   });
 
   bot.action('back_to_profile', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
-    await showOwnProfile(ctx, user);
+    await showAfterEdit(ctx, user);
   });
 
   bot.action('1edit_level_disabled', async (ctx) => {
@@ -299,7 +358,7 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
 
   bot.action(/^1edit_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
 
     const field = getCallbackPayload(ctx).replace('1edit_', '');
@@ -421,7 +480,7 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
 
   bot.action('edit_photo_upload', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    await requireRegistered(ctx);
+    await resolveEditUser(ctx);
     await setState(ctx, EditProfileStates.PHOTO_UPLOAD, {});
     await editText(ctx, TXT.profile.photo_send, {
       attachments: [Keyboard.inlineKeyboard([[editBackButton()]])],
@@ -430,16 +489,16 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
 
   bot.action('edit_photo_none', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
     user.photo_path = undefined;
     await saveProfile(ctx, user);
-    await showOwnProfile(ctx, user);
+    await showAfterEdit(ctx, user);
   });
 
   bot.action('edit_photo_profile', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
 
     let avatarUrl: string | undefined;
@@ -461,13 +520,13 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
 
     user.photo_path = avatarUrl;
     await saveProfile(ctx, user);
-    await showOwnProfile(ctx, user);
+    await showAfterEdit(ctx, user);
   });
 
   bot.action(/^edit_country_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const country = decodeURIComponent(getCallbackPayload(ctx).replace('edit_country_', ''));
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
 
     if (country === TXT.registration.other_country) {
@@ -519,18 +578,18 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
   bot.action(/^edit_payment_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const payment = decodeURIComponent(getCallbackPayload(ctx).replace('edit_payment_', ''));
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
     user.default_payment = payment;
     await saveProfile(ctx, user);
     await clearState(ctx);
-    await showOwnProfile(ctx, user);
+    await showAfterEdit(ctx, user);
   });
 
   bot.action(/^edit_role_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const role = decodeURIComponent(getCallbackPayload(ctx).replace('edit_role_', '')) as UserRole;
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
     user.role = role;
 
@@ -538,7 +597,7 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
       delete user.price;
       await saveProfile(ctx, user);
       await clearState(ctx);
-      await showOwnProfile(ctx, user);
+      await showAfterEdit(ctx, user);
       return;
     }
 
@@ -552,32 +611,32 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
   bot.action(/^edit_sport_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const newSport = decodeURIComponent(getCallbackPayload(ctx).replace('edit_sport_', '')) as SportType;
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
 
     if (user.sport === newSport) {
       await clearState(ctx);
-      await showOwnProfile(ctx, user);
+      await showAfterEdit(ctx, user);
       return;
     }
 
     const migrated = migrateProfileData(user.sport, newSport, user);
     await saveProfile(ctx, migrated);
     await clearState(ctx);
-    await showOwnProfile(ctx, migrated);
+    await showAfterEdit(ctx, migrated);
   });
 
   bot.action(/^dgoal_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const key = getCallbackPayload(ctx).replace('dgoal_', '');
     const goal = DATING_GOALS.find((g) => g.key === key);
-    const user = await requireRegistered(ctx);
+    const user = await resolveEditUser(ctx);
     if (!user) return;
     user.dating_goal_key = key;
     user.dating_goal = goal?.ru;
     await saveProfile(ctx, user);
     await clearState(ctx);
-    await showOwnProfile(ctx, user);
+    await showAfterEdit(ctx, user);
   });
 
   bot.action(/^dint_/, async (ctx) => {
@@ -587,13 +646,13 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
     if (payload === 'dint_done') {
       const data = getStateData<EditData>(ctx);
       const keys = data.dating_interests_keys ?? [];
-      const user = await requireRegistered(ctx);
+      const user = await resolveEditUser(ctx);
       if (!user) return;
       user.dating_interests_keys = keys;
       user.dating_interests = keys.map((k) => DATING_INTERESTS.find((i) => i.key === k)?.ru ?? k);
       await saveProfile(ctx, user);
       await clearState(ctx);
-      await showOwnProfile(ctx, user);
+      await showAfterEdit(ctx, user);
       return;
     }
 

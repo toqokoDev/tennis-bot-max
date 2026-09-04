@@ -126,6 +126,13 @@ export enum AdminBroadcastStates {
   CONFIRM = 'CONFIRM',
 }
 
+export enum AdminSubscriptionStates {
+  SEARCH_USER = 'ADMIN_SUB_SEARCH_USER',
+  EDIT_UNTIL = 'ADMIN_SUB_EDIT_UNTIL',
+  EDIT_ACTIVATED = 'ADMIN_SUB_EDIT_ACTIVATED',
+  EDIT_EMAIL = 'ADMIN_SUB_EDIT_EMAIL',
+}
+
 export enum BrowseOffersStates {
   SELECT_SPORT = 'SELECT_SPORT',
   SELECT_COUNTRY = 'SELECT_COUNTRY',

@@ -162,12 +162,24 @@ export class JsonStorage {
     return Boolean(banned[String(userId)]);
   }
 
-  async banUser(userId: number, reason: string): Promise<void> {
+  async banUser(
+    userId: number,
+    reason: string,
+    extra: Partial<BannedUser> = {},
+  ): Promise<void> {
     await withLock('banned', async () => {
       const banned = await readJson<Record<string, BannedUser>>(this.bannedFile, {});
-      banned[String(userId)] = { reason, banned_at: new Date().toISOString() };
+      banned[String(userId)] = {
+        reason,
+        banned_at: new Date().toISOString(),
+        ...extra,
+      };
       await writeJsonAtomic(this.bannedFile, banned);
     });
+  }
+
+  async clearAllBans(): Promise<void> {
+    await this.saveBanned({});
   }
 
   async unbanUser(userId: number): Promise<void> {

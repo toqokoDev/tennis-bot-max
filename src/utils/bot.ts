@@ -285,10 +285,20 @@ export function profileKeyboard(
   }
 
   if (viewerId && isAdmin(viewerId)) {
+    const id = profile.max_user_id;
     buttons.push([
-      Keyboard.button.callback(TXT.admin.ban, `admin_ban_user:${profile.max_user_id}`),
-      Keyboard.button.callback(TXT.admin.delete_user, `admin_delete_user:${profile.max_user_id}`),
+      Keyboard.button.callback(TXT.admin.delete_user, `admin_select_user:${id}`),
+      Keyboard.button.callback(TXT.admin.manage_subscription, `admin_select_subscription:${id}`),
     ]);
+    buttons.push([
+      Keyboard.button.callback(TXT.admin.ban, `admin_ban_user:${id}`),
+      Keyboard.button.callback(TXT.admin.delete_vacation, `admin_confirm_delete_vacation:${id}`),
+    ]);
+    if (!isOwn) {
+      buttons.push([
+        Keyboard.button.callback(TXT.admin.edit_other_profile, `admin_edit_profile:${id}`),
+      ]);
+    }
   }
 
   if (listBackPayload) {

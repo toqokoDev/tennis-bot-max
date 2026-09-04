@@ -16,7 +16,7 @@ import { handleTourMessage } from './handlers/tours.js';
 import { handlePaymentMessage } from './handlers/payments.js';
 import { handleTournamentPaymentMessage, handleTournamentBrowseMessage } from './handlers/tournament.js';
 
-import { handleAdminBroadcast } from './handlers/admin.js';
+import { handleAdminMessage } from './handlers/admin.js';
 import { startBackgroundJobs, stopBackgroundJobs } from './jobs/tournamentJobs.js';
 import { clearWebhookSubscriptions } from './utils/clearWebhooks.js';
 import { beginCommandResponse, showMainMenu } from './utils/bot.js';
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     if (await handleTournamentPaymentMessage(ctx)) return;
     if (await handlePaymentMessage(ctx)) return;
     const text = getMessageText(ctx) ?? '';
-    if (await handleAdminBroadcast(ctx, text)) return;
+    if (await handleAdminMessage(ctx, text)) return;
 
     // Любой текст вне FSM / команд меню → обычное главное меню
     if (!text) return;
