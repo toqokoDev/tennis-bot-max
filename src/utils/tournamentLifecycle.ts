@@ -68,6 +68,7 @@ export function isPaymentWindowExpired(t: Tournament): boolean {
 }
 
 export function addParticipant(t: Tournament, userId: number, name: string): Tournament {
+  if (t.participants[String(userId)]) return t;
   if (Object.keys(t.participants).length >= t.participants_count) return t;
   return {
     ...t,
@@ -76,6 +77,14 @@ export function addParticipant(t: Tournament, userId: number, name: string): Tou
       [String(userId)]: { user_id: userId, name, joined_at: new Date().toISOString() },
     },
   };
+}
+
+export function isParticipant(t: Tournament, userId: number): boolean {
+  return Boolean(t.participants[String(userId)]);
+}
+
+export function isTournamentFull(t: Tournament): boolean {
+  return Object.keys(t.participants).length >= t.participants_count;
 }
 
 export function removeParticipant(t: Tournament, userId: number): Tournament {

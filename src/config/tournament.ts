@@ -145,16 +145,100 @@ export function categoryFromLevel(levelText?: string): string | null {
 export function isLevelMatch(userLevel?: string | null, tournamentLevel?: string | null): boolean {
   try {
     if (!userLevel || !tournamentLevel) return true;
+    const tl = String(tournamentLevel).trim();
+    if (!tl || tl === 'Не указан' || tl === 'Без уровня' || tl === 'Без категории') return true;
+
     const userVal = Number(String(userLevel).replace(',', '.'));
     if (Number.isNaN(userVal)) return true;
-    if (tournamentLevel.includes('-')) {
-      const [low, high] = tournamentLevel.replace(',', '.').split('-').map((x) => Number(x.trim()));
+
+    // Диапазон вида "2.5-3.5"
+    if (tl.includes('-')) {
+      const [low, high] = tl.replace(',', '.').split('-').map((x) => Number(x.trim()));
+      if (Number.isNaN(low) || Number.isNaN(high)) return true;
       return low <= userVal && userVal <= high;
     }
-    return Math.abs(Number(tournamentLevel.replace(',', '.')) - userVal) < 1e-6;
+
+    // Вид "5.5+"
+    if (tl.endsWith('+')) {
+      const low = Number(tl.slice(0, -1).replace(',', '.'));
+      if (Number.isNaN(low)) return true;
+      return userVal >= low;
+    }
+
+    return Math.abs(Number(tl.replace(',', '.')) - userVal) < 1e-6;
   } catch {
     return true;
   }
+}
+
+/** Совместимость пола профиля с форматом турнира */
+export function isGenderMatch(userGender?: string | null, tournamentGender?: string | null): boolean {
+  if (!tournamentGender) return true;
+  if (tournamentGender === 'Микст') return true;
+  if (!userGender) return false;
+  if (tournamentGender === 'Мужчины' || tournamentGender === 'Мужская пара') {
+    return userGender === 'Мужской';
+  }
+  if (tournamentGender === 'Женщины' || tournamentGender === 'Женская пара') {
+    return userGender === 'Женский';
+  }
+  return true;
+}
+
+export type JoinBlockReason =
+  | 'not_found'
+  | 'unavailable'
+  | 'already_registered'
+  | 'full'
+  | 'level'
+  | 'gender'
+  | 'age'
+  | 'category'
+  | 'sport';
+
+export function getJoinBlockReason(
+  tourn: {
+    status: string;
+    sport?: string;
+    gender?: string;
+    category?: string;
+    level?: string;
+    age_group?: string;
+    participants: Record<string, unknown>;
+    participants_count: number;
+  } | null | undefined,
+  user: {
+    max_user_id: number;
+    sport?: string;
+    gender?: string;
+    player_level?: string;
+    rating_points?: number;
+    birth_date?: string;
+  },
+): JoinBlockReason | null {
+  if (!tourn) return 'not_found';
+  if (tourn.status !== 'active') return 'unavailable';
+  if (tourn.participants[String(user.max_user_id)]) return 'already_registered';
+  if (Object.keys(tourn.participants).length >= tourn.participants_count) return 'full';
+
+  if (tourn.sport && user.sport && tourn.sport !== user.sport) return 'sport';
+
+  if (!isLevelMatch(user.player_level, tourn.level)) return 'level';
+
+  if (!isGenderMatch(user.gender, tourn.gender)) return 'gender';
+
+  const { category, ageGroup } = autoCategoryAndAge(user);
+  if (tourn.age_group && tourn.age_group !== ageGroup) return 'age';
+  if (
+    tourn.category
+    && tourn.category !== 'Без категории'
+    && category
+    && tourn.category !== category
+  ) {
+    return 'category';
+  }
+
+  return null;
 }
 
 export function autoCategoryAndAge(profile: {

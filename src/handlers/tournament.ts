@@ -14,6 +14,7 @@ import {
   generateTournamentName,
   autoCategoryAndAge,
   isLevelMatch,
+  getJoinBlockReason,
 } from '../config/tournament.js';
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState, getPrevMessageId, setPrevMessageId } from '../middleware/session.js';
@@ -27,6 +28,7 @@ import { chunkButtons, showCurrentMessage, askText, backButton } from '../utils/
 import {
   addParticipant,
   canStartTournament,
+  isParticipant,
   openPaymentWindow,
   removeParticipant,
   shouldOpenPaymentWindow,
@@ -493,15 +495,58 @@ export async function handleJoinTournament(
     return;
   }
   let tourn = await storage.getTournament(id);
-  if (!tourn || tourn.status !== 'active') {
+
+  const notify = async (text: string): Promise<void> => {
     if (fromDeepLink || !ctx.callback) {
-      await ctx.reply(TXT.tournament.unavailable);
+      await ctx.reply(text);
     } else {
-      await ctx.answerOnCallback({ notification: TXT.tournament.unavailable });
+      await ctx.answerOnCallback({ notification: text });
+    }
+  };
+
+  const showCard = async (t: typeof tourn, withImage = true): Promise<void> => {
+    if (!t) return;
+    await showTournamentCard(ctx, t, undefined, {
+      mode: fromDeepLink || !ctx.callback ? 'new' : 'edit',
+      withImage,
+    });
+  };
+
+  const block = getJoinBlockReason(tourn, user);
+  if (block) {
+    const userLevel = user.player_level || 'не указан';
+    const messages: Record<NonNullable<typeof block>, string> = {
+      not_found: TXT.tournament.not_found,
+      unavailable: TXT.tournament.unavailable,
+      already_registered: TXT.tournament.already_registered,
+      full: TXT.tournament.tournament_full,
+      level: fmt(TXT.tournament.level_mismatch, {
+        user_level: userLevel,
+        tournament_level: tourn?.level || 'не указан',
+      }),
+      gender: fmt(TXT.tournament.gender_mismatch, { gender: tourn?.gender || '' }),
+      age: fmt(TXT.tournament.age_mismatch, { age_group: tourn?.age_group || '' }),
+      category: fmt(TXT.tournament.category_mismatch, { category: tourn?.category || '' }),
+      sport: fmt(TXT.tournament.sport_mismatch, {
+        sport: tourn?.sport || '',
+        user_sport: user.sport || '',
+      }),
+    };
+    await notify(messages[block]);
+    if (tourn && (block === 'already_registered' || block === 'full' || block === 'level'
+      || block === 'gender' || block === 'age' || block === 'category' || block === 'sport')) {
+      await showCard(tourn, Boolean(fromDeepLink || !ctx.callback));
     }
     return;
   }
-  tourn = addParticipant(tourn, user.max_user_id, `${user.first_name} ${user.last_name}`);
+
+  tourn = addParticipant(tourn!, user.max_user_id, `${user.first_name} ${user.last_name}`);
+  // Защита на случай гонки: ключ уже был / лимит
+  if (!isParticipant(tourn, user.max_user_id)) {
+    await notify(TXT.tournament.tournament_full);
+    return;
+  }
+
   if (shouldOpenPaymentWindow(tourn)) tourn = openPaymentWindow(tourn);
   if (canStartTournament(tourn)) tourn = startTournament(tourn);
   await storage.saveTournament(tourn);
@@ -714,7 +759,11 @@ async function showTournamentCard(
     ]);
   }
 
-  if (tourn.status === 'active' && !isParticipant) {
+  const viewer = await storage.getUser(userId);
+  const canJoin = viewer
+    ? getJoinBlockReason(tourn, viewer) === null
+    : tourn.status === 'active' && !isParticipant;
+  if (canJoin) {
     buttons.push([Keyboard.button.callback(TXT.tournament.join, `join_tournament:${tourn.id}`)]);
   }
   if (isParticipant && tourn.status === 'active') {
