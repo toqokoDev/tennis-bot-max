@@ -19,6 +19,10 @@ import { handleTournamentPaymentMessage, handleTournamentBrowseMessage } from '.
 import { handleAdminBroadcast } from './handlers/admin.js';
 import { startBackgroundJobs, stopBackgroundJobs } from './jobs/tournamentJobs.js';
 import { clearWebhookSubscriptions } from './utils/clearWebhooks.js';
+import { beginCommandResponse, showMainMenu } from './utils/bot.js';
+import { clearState } from './middleware/session.js';
+import { getMessageText } from './context.js';
+import { startRegistration } from './handlers/registration.js';
 
 async function main(): Promise<void> {
   if (!env.BOT_TOKEN) {
@@ -49,8 +53,18 @@ async function main(): Promise<void> {
     if (await handleTournamentBrowseMessage(ctx)) return;
     if (await handleTournamentPaymentMessage(ctx)) return;
     if (await handlePaymentMessage(ctx)) return;
-    const text = ctx.message?.body.text ?? '';
+    const text = getMessageText(ctx) ?? '';
     if (await handleAdminBroadcast(ctx, text)) return;
+
+    // Любой текст вне FSM / команд меню → обычное главное меню
+    if (!text) return;
+    beginCommandResponse(ctx);
+    await clearState(ctx);
+    if (ctx.profile) {
+      await showMainMenu(ctx);
+    } else {
+      await startRegistration(ctx);
+    }
   });
 
   bot.catch((err, ctx) => {

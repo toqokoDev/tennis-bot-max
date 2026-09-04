@@ -11,24 +11,32 @@ import { getCallbackPayload } from '../utils/callback.js';
 
 type BroadcastData = { text?: string };
 
+async function requireAdmin(ctx: AppContext): Promise<boolean> {
+  if (isAdmin(getCtxUserId(ctx))) return true;
+  await ctx.reply(TXT.admin.no_rights);
+  return false;
+}
+
 export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
-  bot.command('admin', async (ctx) => {
-    if (!isAdmin(getCtxUserId(ctx))) return;
+  // max-bot-api strips only leading `/`; clients may append @botname
+  bot.command(/^admin(?:@[\w]+)?$/i, async (ctx) => {
     beginCommandResponse(ctx);
+    if (!(await requireAdmin(ctx))) return;
+    await clearState(ctx);
     await showAdminMenu(ctx);
   });
 
-  bot.command('banned_users', async (ctx) => {
-    if (!isAdmin(getCtxUserId(ctx))) return;
+  bot.command(/^banned_users(?:@[\w]+)?$/i, async (ctx) => {
     beginCommandResponse(ctx);
+    if (!(await requireAdmin(ctx))) return;
     const banned = await storage.getBanned();
     const text = Object.entries(banned).map(([id, b]) => `${id}: ${b.reason}`).join('\n') || '—';
     await ctx.reply(text);
   });
 
-  bot.command(/^unban_user\s+(\d+)/, async (ctx) => {
-    if (!isAdmin(getCtxUserId(ctx))) return;
+  bot.command(/^unban_user(?:@[\w]+)?\s+(\d+)/i, async (ctx) => {
     beginCommandResponse(ctx);
+    if (!(await requireAdmin(ctx))) return;
     const id = Number(ctx.match?.[1]);
     await storage.unbanUser(id);
     await ctx.reply(`Unbanned ${id}`);
@@ -36,21 +44,21 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
 
   bot.action('admin_stats', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
+    if (!(await requireAdmin(ctx))) return;
     const users = await storage.getUsers();
     await ctx.reply(fmt(TXT.admin.users_count, { count: Object.keys(users).length }));
   });
 
   bot.action('admin_broadcast', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
+    if (!(await requireAdmin(ctx))) return;
     await setState(ctx, AdminBroadcastStates.MANUAL_TEXT, {});
     await askText(ctx, TXT.admin.broadcast_prompt);
   });
 
   bot.action('admin_broadcast_confirm', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
+    if (!(await requireAdmin(ctx))) return;
     const data = getStateData<BroadcastData>(ctx);
     if (!data.text) {
       await ctx.reply(TXT.admin.broadcast_empty, { attachments: [backButton()] });
@@ -72,14 +80,14 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
 
   bot.action('admin_broadcast_cancel', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
+    if (!(await requireAdmin(ctx))) return;
     await clearState(ctx);
     await showAdminMenu(ctx);
   });
 
   bot.action(/^admin_ban_user:/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
+    if (!(await requireAdmin(ctx))) return;
     const id = Number(getCallbackPayload(ctx).replace('admin_ban_user:', ''));
     await storage.banUser(id, 'Admin ban');
     await ctx.reply(`Banned ${id}`);
@@ -87,7 +95,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
 
   bot.action(/^admin_delete_user:/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
+    if (!(await requireAdmin(ctx))) return;
     const id = Number(getCallbackPayload(ctx).replace('admin_delete_user:', ''));
     await storage.deleteUser(id);
     await ctx.reply(`Deleted ${id}`);
@@ -101,7 +109,7 @@ async function showAdminMenu(ctx: AppContext): Promise<void> {
       [Keyboard.button.callback(TXT.admin.broadcast, 'admin_broadcast')],
       [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
     ])],
-  });
+  }, 'new');
 }
 
 export async function handleAdminBroadcast(ctx: AppContext, text: string): Promise<boolean> {

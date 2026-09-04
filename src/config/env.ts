@@ -38,7 +38,8 @@ export const env = {
 };
 
 export function isAdmin(userId: number): boolean {
-  return userId === env.ADMIN_ID;
+  if (!env.ADMIN_ID) return false;
+  return Number(userId) === Number(env.ADMIN_ID);
 }
 
 export function getDeepLink(payload: string): string {

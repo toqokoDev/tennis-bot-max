@@ -144,7 +144,12 @@ export interface Tournament {
   comment?: string;
   status: TournamentStatus;
   entry_fee: number;
-  payments: Record<string, { status: 'pending' | 'succeeded'; payment_id: string; provider?: 'tinkoff' | 'yookassa' }>;
+  payments: Record<string, {
+    status: 'pending' | 'succeeded';
+    payment_id: string;
+    provider?: 'tinkoff' | 'yookassa';
+    payment_link?: string;
+  }>;
   payment_window?: { active: boolean; deadline_at: string; created_at: string };
   bracket?: Record<string, unknown>;
   round_robin?: Record<string, unknown>;

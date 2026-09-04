@@ -415,6 +415,7 @@ async function applyProposedTournament(ctx: AppContext): Promise<void> {
   const buttons: Btn[][] = [];
   if (tourn.entry_fee > 0) {
     buttons.push([Keyboard.button.callback(TXT.tournament.pay, `pay_tournament:${tourn.id}`)]);
+    buttons.push([Keyboard.button.callback(TXT.payments.check, `tournament_pay_check:${tourn.id}`)]);
   }
   buttons.push([Keyboard.button.callback(TXT.tournament.all_tournaments, 'tournament_list')]);
   buttons.push(mainMenuRow());
@@ -635,6 +636,7 @@ export async function handleTournamentPaymentMessage(ctx: AppContext): Promise<b
       status: 'pending',
       payment_id: payment.paymentId,
       provider: payment.provider,
+      payment_link: payment.paymentUrl,
     };
     await storage.saveTournament(tourn);
   }
@@ -648,6 +650,7 @@ export async function handleTournamentPaymentMessage(ctx: AppContext): Promise<b
     attachments: [Keyboard.inlineKeyboard([
       [Keyboard.button.link(TXT.payments.continue_pay, payment.paymentUrl)],
       [Keyboard.button.callback(TXT.payments.confirm_pay, `tournament_pay_confirm:${data.tournament_id}`)],
+      [Keyboard.button.callback(TXT.payments.check, `tournament_pay_check:${data.tournament_id}`)],
       mainMenuRow(),
     ])],
   });
@@ -689,12 +692,22 @@ async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): 
   const paymentId = data.payment_id ?? stored?.payment_id;
   const provider = data.provider ?? stored?.provider ?? 'tinkoff';
   if (!paymentId) {
-    await ctx.reply(TXT.tournament.payment_not_confirmed, { attachments: [backButton()] });
+    await ctx.reply(TXT.tournament.payment_no_pending, { attachments: [backButton()] });
     return;
   }
   const status = await checkPaymentStatus(paymentId, provider);
   if (status !== 'succeeded') {
-    await ctx.reply(TXT.tournament.payment_not_confirmed, { attachments: [backButton()] });
+    const payUrl = data.payment_url || stored?.payment_link;
+    const rows: Array<Array<ReturnType<typeof Keyboard.button.callback> | ReturnType<typeof Keyboard.button.link>>> = [];
+    if (payUrl) {
+      rows.push([Keyboard.button.link(TXT.payments.continue_pay, payUrl)]);
+    }
+    rows.push([Keyboard.button.callback(TXT.payments.confirm_pay, `tournament_pay_confirm:${tournamentId}`)]);
+    rows.push([Keyboard.button.callback(TXT.payments.check, `tournament_pay_check:${tournamentId}`)]);
+    rows.push(mainMenuRow());
+    await ctx.reply(TXT.tournament.payment_not_confirmed, {
+      attachments: [Keyboard.inlineKeyboard(rows)],
+    });
     return;
   }
   const tourn = await storage.getTournament(tournamentId);
@@ -770,6 +783,7 @@ async function showTournamentCard(
     buttons.push([Keyboard.button.callback(TXT.tournament.leave, `leave_tournament:${tourn.id}`)]);
     if (tourn.entry_fee > 0 && !paid) {
       buttons.push([Keyboard.button.callback(TXT.tournament.pay, `pay_tournament:${tourn.id}`)]);
+      buttons.push([Keyboard.button.callback(TXT.payments.check, `tournament_pay_check:${tourn.id}`)]);
     }
   }
   if (tourn.status === 'started' && (tourn.bracket || tourn.round_robin) && !tourn.hide_bracket) {
@@ -1063,6 +1077,12 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
   bot.action(/^tournament_pay_confirm:/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const id = getCallbackPayload(ctx).replace('tournament_pay_confirm:', '');
+    await confirmTournamentPayment(ctx, id);
+  });
+
+  bot.action(/^tournament_pay_check:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const id = getCallbackPayload(ctx).replace('tournament_pay_check:', '');
     await confirmTournamentPayment(ctx, id);
   });
 
