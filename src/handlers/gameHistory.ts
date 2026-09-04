@@ -150,6 +150,7 @@ export function registerGameHistoryHandlers(bot: import('@maxhub/max-bot-api').B
       await showProfile(ctx, profile, {
         isOwn: context.isOwn,
         listBackPayload: context.listBackPayload,
+        reopenPayload: context.reopenPayload,
       });
     }
   });

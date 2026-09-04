@@ -504,7 +504,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
   bot.action('tournament_list', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     await setState(ctx, ViewTournamentsStates.SPORT, {});
-    await showCurrentMessage(ctx, TXT.search.choose_sport, {
+    await showCurrentMessage(ctx, TXT.tournament.choose_sport, {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `tviewsport_${encodeURIComponent(s)}`), 2),
       )],
@@ -521,7 +521,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     const data = getStateData<ViewData>(ctx);
     data.sport = decodeURIComponent(getCallbackPayload(ctx).replace('tviewsport_', '')) as SportType;
     await setState(ctx, ViewTournamentsStates.COUNTRY, data);
-    await showCurrentMessage(ctx, TXT.search.choose_country, {
+    await showCurrentMessage(ctx, TXT.tournament.choose_country, {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(Object.keys(COUNTRIES), (c) => Keyboard.button.callback(c, `tviewcountry_${encodeURIComponent(c)}`), 2),
       )],
@@ -534,7 +534,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     data.country = decodeURIComponent(getCallbackPayload(ctx).replace('tviewcountry_', ''));
     await setState(ctx, ViewTournamentsStates.CITY, data);
     const cities = COUNTRIES[data.country!] ?? [];
-    await showCurrentMessage(ctx, TXT.tournament.choose_city, {
+    await showCurrentMessage(ctx, fmt(TXT.tournament.choose_city, { country: data.country! }), {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(cities, (c) => Keyboard.button.callback(c, `tviewcity_${encodeURIComponent(c)}`), 2),
       )],
@@ -662,7 +662,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: 'OK' });
     if (!isAdmin(getCtxUserId(ctx))) return;
     await setState(ctx, CreateTournamentStates.SPORT, {});
-    await showCurrentMessage(ctx, TXT.search.choose_sport, {
+    await showCurrentMessage(ctx, TXT.tournament.choose_sport, {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `tcsport_${encodeURIComponent(s)}`), 2),
       )],
@@ -674,7 +674,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     const data = getStateData<CreateData>(ctx);
     data.sport = decodeURIComponent(getCallbackPayload(ctx).replace('tcsport_', '')) as SportType;
     await setState(ctx, CreateTournamentStates.COUNTRY, data);
-    await showCurrentMessage(ctx, TXT.search.choose_country, {
+    await showCurrentMessage(ctx, TXT.tournament.choose_country, {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(Object.keys(COUNTRIES), (c) => Keyboard.button.callback(c, `tccountry_${encodeURIComponent(c)}`), 2),
       )],
@@ -687,7 +687,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     data.country = decodeURIComponent(getCallbackPayload(ctx).replace('tccountry_', ''));
     await setState(ctx, CreateTournamentStates.CITY, data);
     const cities = COUNTRIES[data.country!] ?? [];
-    await showCurrentMessage(ctx, fmt(TXT.search.choose_city, { country: data.country! }), {
+    await showCurrentMessage(ctx, fmt(TXT.tournament.choose_city, { country: data.country! }), {
       attachments: [Keyboard.inlineKeyboard(
         chunkButtons(cities, (c) => Keyboard.button.callback(c, `tccity_${encodeURIComponent(c)}`), 2),
       )],

@@ -6,17 +6,19 @@ export type ProfileViewContext = {
   userId: number;
   isOwn?: boolean;
   listBackPayload?: string;
+  reopenPayload?: string;
 };
 
 export function saveProfileViewContext(
   ctx: { session: { data: Record<string, unknown> } },
   profile: UserProfile,
-  options: { isOwn?: boolean; listBackPayload?: string } = {},
+  options: { isOwn?: boolean; listBackPayload?: string; reopenPayload?: string } = {},
 ): void {
   ctx.session.data.profileViewContext = {
     userId: profile.max_user_id,
     isOwn: options.isOwn ?? false,
     listBackPayload: options.listBackPayload,
+    reopenPayload: options.reopenPayload,
   } satisfies ProfileViewContext;
 }
 

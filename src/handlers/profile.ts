@@ -5,11 +5,16 @@ import { getCtxUserId } from '../context.js';
 import { storage } from '../storage/jsonStorage.js';
 import { editButtons, showProfile } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
+import { getProfileViewContext } from '../utils/gameHistory.js';
 import { requireRegistered } from './registration.js';
 import { hasProSubscription } from '../utils/validation.js';
 import { formatProLockedMessage } from '../utils/subscription.js';
 import { registerProfileEditHandlers, showOwnProfile } from './profileEdit.js';
 import { registerGameHistoryHandlers } from './gameHistory.js';
+
+function profileReopenPayload(ctx: AppContext, targetId: number): string {
+  return getProfileViewContext(ctx)?.reopenPayload ?? `partner_show_profile_${targetId}`;
+}
 
 export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
   registerProfileEditHandlers(bot);
@@ -43,7 +48,7 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
     const viewer = await requireRegistered(ctx);
     if (!viewer) return;
     const targetId = Number(getCallbackPayload(ctx).replace('profile_contact:', ''));
-    const backPayload = `partner_show_profile_${targetId}`;
+    const backPayload = profileReopenPayload(ctx, targetId);
     if (!hasProSubscription(viewer)) {
       await editButtons(ctx, formatProLockedMessage('contacts', viewer.max_user_id), [
         Keyboard.inlineKeyboard([
@@ -73,26 +78,58 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
     await ctx.answerOnCallback({ notification: 'OK' });
     const targetId = Number(getCallbackPayload(ctx).replace('partner_show_profile_', ''));
     const profile = await storage.getUser(targetId);
-    if (profile) await showProfile(ctx, profile, { listBackPayload: 'partner_back_to_results' });
+    if (profile) {
+      await showProfile(ctx, profile, {
+        listBackPayload: 'partner_back_to_results',
+        reopenPayload: `partner_show_profile_${targetId}`,
+      });
+    }
+  });
+
+  bot.action(/^tour_show_profile_/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const targetId = Number(getCallbackPayload(ctx).replace('tour_show_profile_', ''));
+    const profile = await storage.getUser(targetId);
+    if (profile) {
+      await showProfile(ctx, profile, {
+        listBackPayload: 'tour_back_to_results',
+        reopenPayload: `tour_show_profile_${targetId}`,
+      });
+    }
   });
 
   bot.action(/^coach_show_profile_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const targetId = Number(getCallbackPayload(ctx).replace('coach_show_profile_', ''));
     const profile = await storage.getUser(targetId);
-    if (profile) await showProfile(ctx, profile, { listBackPayload: 'coach_back_to_results' });
+    if (profile) {
+      await showProfile(ctx, profile, {
+        listBackPayload: 'coach_back_to_results',
+        reopenPayload: `coach_show_profile_${targetId}`,
+      });
+    }
   });
 
   bot.action(/^players_show_profile_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const targetId = Number(getCallbackPayload(ctx).replace('players_show_profile_', ''));
     const profile = await storage.getUser(targetId);
-    if (profile) await showProfile(ctx, profile, { listBackPayload: 'players_back_to_results' });
+    if (profile) {
+      await showProfile(ctx, profile, {
+        listBackPayload: 'players_back_to_results',
+        reopenPayload: `players_show_profile_${targetId}`,
+      });
+    }
   });
 
   bot.action('partner_back_to_results', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     await import('./searchPartner.js').then((m) => m.showSearchResults(ctx));
+  });
+
+  bot.action('tour_back_to_results', async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    await import('./tours.js').then((m) => m.showTourBrowseResults(ctx));
   });
 
   bot.action('coach_back_to_results', async (ctx) => {

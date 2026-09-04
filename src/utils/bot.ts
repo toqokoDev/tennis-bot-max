@@ -255,7 +255,7 @@ export function formatProfileText(profile: UserProfile): string {
 
 export function profileKeyboard(
   profile: UserProfile,
-  options: { isOwn?: boolean; listBackPayload?: string; viewerId?: number } = {},
+  options: { isOwn?: boolean; listBackPayload?: string; reopenPayload?: string; viewerId?: number } = {},
 ): AttachmentRequest[] {
   const { isOwn = false, listBackPayload, viewerId } = options;
   const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
@@ -301,7 +301,12 @@ export function profileKeyboard(
 export async function showProfile(
   ctx: AppContext,
   profile: UserProfile,
-  options: { isOwn?: boolean; listBackPayload?: string; mode?: 'new' | 'edit' } = {},
+  options: {
+    isOwn?: boolean;
+    listBackPayload?: string;
+    reopenPayload?: string;
+    mode?: 'new' | 'edit';
+  } = {},
 ): Promise<void> {
   const { mode = 'edit', ...keyboardOptions } = options;
   saveProfileViewContext(ctx, profile, keyboardOptions);
