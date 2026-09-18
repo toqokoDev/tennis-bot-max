@@ -59,7 +59,7 @@ async function runBot(): Promise<Bot<AppContext>> {
 
     // Любой текст вне FSM / команд меню → обычное главное меню
     if (!text) return;
-    beginCommandResponse(ctx);
+    await beginCommandResponse(ctx);
     await clearState(ctx);
     if (ctx.profile) {
       await showMainMenu(ctx);

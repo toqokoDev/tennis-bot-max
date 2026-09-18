@@ -88,6 +88,7 @@ export const TXT = {
     game_history: '📊 История игр',
     delete: '🗑 Удалить профиль',
     contact: '📞 Связаться',
+    open_chat: '💬 Написать в чат',
     not_found: '😕 Профиль не найден',
     vacation_partner: '✈️ Найти партнёра на отдыхе',
     confirm_delete: '⚠️ Вы уверены, что хотите удалить профиль? Это действие нельзя отменить.',
@@ -101,6 +102,7 @@ export const TXT = {
     edit_photo: '📷 Фото',
     edit_location: '🌍 Страна и город',
     edit_about: '📝 О себе',
+    about_label: '📝 О себе:',
     edit_payment: '💳 Оплата',
     edit_role: '🎯 Роль',
     edit_level: '🏆 Уровень',
@@ -497,6 +499,11 @@ export const TXT = {
     action_cancelled: '❌ Действие отменено',
     banned_list: '🚫 Забаненные пользователи',
     broadcast: '📢 Рассылка объявления',
+    manage_users: '👥 Пользователи',
+    users_empty: '📋 Пользователей пока нет.',
+    users_list_title: '👥 <b>Пользователи</b> ({total})\nСтраница {page}/{pages}\n\nВыберите пользователя:',
+    user_card:
+      '👤 <b>{name}</b>\n🆔 ID: <code>{id}</code>\n📞 {phone}\n🗂 Спорт: {sport}\n🌍 {location}\n🏆 Рейтинг: {rating} ({level})\n🎮 Игр: {played} · 🏅 Побед: {wins}\n📋 Активных предложений: {offers}\n\n{sub_info}',
     manage_subscriptions: '🔔 Управление подписками',
     create_tournament: '➕ Создать турнир',
     edit_tournaments: '✏️ Управление турнирами',
@@ -516,8 +523,9 @@ export const TXT = {
     broadcast_forward_prompt:
       '📨 <b>Переслать сообщение</b>\n\nОтправьте одно сообщение с текстом и/или фото/видео. Оно будет разослано всем пользователям бота.',
     broadcast_media_prompt:
-      '📷 <b>Шаг 1: Медиа</b>\n\nОтправьте фото (можно несколько). Когда готово — нажмите «Готово с медиа → Текст». Можно сразу перейти к тексту без медиа.',
+      '📷 <b>Шаг 1: Медиа</b>\n\nОтправьте фото (можно несколько). Когда готово — нажмите «Готово с медиа → Текст». Или нажмите «Без фото», чтобы разослать только текст.',
     broadcast_media_done: '✅ Готово с медиа → Текст',
+    broadcast_no_photo: '⏭ Без фото',
     broadcast_text_prompt: '📝 <b>Шаг 2: Текст</b>\n\nВведите текст рассылки или нажмите «Пропустить текст».',
     broadcast_skip_text: '⏭ Пропустить текст',
     broadcast_back_media: '← Назад к медиа',

@@ -9,14 +9,13 @@ import {
   GENDERS,
   MOSCOW_DISTRICTS,
   NTRP_LEVELS,
-  SPORTS,
   getSportFieldConfig,
 } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { getStateData, setState } from '../middleware/session.js';
 import { SearchPartnerStates } from '../types/states.js';
 import type { SportType, UserProfile } from '../types/models.js';
-import { chunkButtons, paginate, showCurrentMessage } from '../utils/bot.js';
+import { chunkButtons, paginate, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import {
   countPartnersByField,
@@ -186,7 +185,7 @@ export async function startSearch(ctx: AppContext): Promise<void> {
 async function showSportSelection(ctx: AppContext): Promise<void> {
   const rows: ReturnType<typeof Keyboard.button.callback>[][] = [
     [Keyboard.button.callback(TXT.search.all_sports, 'partner_sport_any')],
-    ...chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `partner_sport_${encodeURIComponent(s)}`), 2),
+    ...sportButtonRows((s) => Keyboard.button.callback(s, `partner_sport_${encodeURIComponent(s)}`)),
     [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
   ];
   await showCurrentMessage(ctx, TXT.search.choose_sport, {

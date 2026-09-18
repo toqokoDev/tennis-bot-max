@@ -67,11 +67,15 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
       ]);
       return;
     }
-    await editButtons(ctx, `📞 ${target.first_name}: ${target.phone}`, [
-      Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.common.back, backPayload)],
-      ]),
-    ]);
+    const rows: Array<Array<ReturnType<typeof Keyboard.button.callback> | ReturnType<typeof Keyboard.button.link>>> = [];
+    if (target.username) {
+      rows.push([Keyboard.button.link(TXT.profile.open_chat, `https://max.ru/${target.username}`)]);
+    }
+    rows.push([Keyboard.button.callback(TXT.common.back, backPayload)]);
+    const message = target.username
+      ? `📞 ${target.first_name}`
+      : `📞 ${target.first_name}: ${target.phone}`;
+    await editButtons(ctx, message, [Keyboard.inlineKeyboard(rows)]);
   });
 
   bot.action(/^deeplink_profile_/, async (ctx) => {

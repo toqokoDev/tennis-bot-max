@@ -94,7 +94,7 @@ Tennis-Play - это платформа для организации тенни
 export function registerMenuHears(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
   const triggers = [...MENU_LABELS];
   bot.hears(triggers, async (ctx) => {
-    beginCommandResponse(ctx);
+    await beginCommandResponse(ctx);
     const text = ctx.message?.body.text ?? '';
     const map: Record<string, () => Promise<void>> = {
       [triggers[0]]: () => import('./searchPartner.js').then((m) => m.startSearch(ctx)),

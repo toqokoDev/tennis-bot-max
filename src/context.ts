@@ -4,6 +4,31 @@ import type { UserProfile, UserSession } from './types/models.js';
 export class AppContext extends Context {
   profile?: UserProfile;
   session: UserSession = { data: {} };
+
+  /**
+   * Любое новое сообщение (после ввода пользователя, ошибки валидации и т.д.) сначала
+   * убирает inline-кнопки с предыдущего "якорного" сообщения бота в этом чате и только
+   * потом отправляет новое — иначе кнопки прошлого шага анкеты/оффера остаются кликабельными.
+   * Правка в одном месте (а не в каждом хендлере) гарантирует, что это работает для всех
+   * ctx.reply(...) по всему проекту, включая прямые вызовы в обход utils/bot.ts.
+   */
+  async reply(...args: Parameters<Context['reply']>): ReturnType<Context['reply']> {
+    await clearAnchorButtons(this);
+    const msg = await super.reply(...args);
+    this.session.prev_msg_id = msg.body.mid;
+    return msg;
+  }
+}
+
+async function clearAnchorButtons(ctx: AppContext): Promise<void> {
+  const targetId = ctx.session.prev_msg_id;
+  if (!targetId) return;
+  try {
+    const msg = await ctx.getMessage(targetId);
+    await ctx.api.editMessage(targetId, { text: msg.body.text ?? '', format: 'html', attachments: [] });
+  } catch {
+    /* сообщение могло быть уже удалено или недоступно для редактирования — игнорируем */
+  }
 }
 
 export function getUserId(ctx: AppContext): number | undefined {

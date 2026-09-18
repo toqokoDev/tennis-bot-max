@@ -10,7 +10,6 @@ import {
   MOSCOW_DISTRICTS,
   PAYMENT_TYPES,
   ROLES,
-  SPORTS,
   calculateLevelFromPoints,
   getSportFieldConfig,
   migrateProfileData,
@@ -27,12 +26,15 @@ import type { SportType, UserProfile, UserRole } from '../types/models.js';
 import {
   askText,
   chunkButtons,
+  chunkButtonsTrailing,
   editButtons,
   editText,
   formatProfileText,
   getMaxProfileAvatarUrl,
   showProfile,
+  sportButtonRows,
 } from '../utils/bot.js';
+import { showUserAdminCard } from '../utils/adminUsers.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 
@@ -72,7 +74,7 @@ async function showAfterEdit(
   const adminTarget = getAdminEditTargetId(ctx);
   if (adminTarget !== undefined) {
     await clearState(ctx);
-    await showProfile(ctx, profile, { isOwn: false, mode });
+    await showUserAdminCard(ctx, String(profile.max_user_id), undefined, mode);
     return;
   }
   await showOwnProfile(ctx, profile, mode);
@@ -178,11 +180,11 @@ async function askForCity(
   country: string,
   currentCity?: string,
 ): Promise<void> {
-  const cities = [...(COUNTRIES[country] ?? []), TXT.registration.other_city];
+  const cities = COUNTRIES[country] ?? [];
   const countryLabel = country.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim();
   await editButtons(ctx, fmt(TXT.profile.select_city, { country: countryLabel }), [
     Keyboard.inlineKeyboard([
-      ...chunkButtons(cities, (c) => Keyboard.button.callback(c, `edit_city_${encodeURIComponent(c)}`), 2),
+      ...chunkButtonsTrailing(cities, TXT.registration.other_city, (c) => Keyboard.button.callback(c, `edit_city_${encodeURIComponent(c)}`), 2),
       [editBackButton()],
     ]),
   ]);
@@ -397,10 +399,10 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
 
     if (field === 'location') {
       await setState(ctx, EditProfileStates.COUNTRY, {});
-      const countries = [...Object.keys(COUNTRIES), TXT.registration.other_country];
+      const countries = Object.keys(COUNTRIES);
       await editButtons(ctx, TXT.profile.select_country, [
         Keyboard.inlineKeyboard([
-          ...chunkButtons(countries, (c) => Keyboard.button.callback(c, `edit_country_${encodeURIComponent(c)}`), 2),
+          ...chunkButtonsTrailing(countries, TXT.registration.other_country, (c) => Keyboard.button.callback(c, `edit_country_${encodeURIComponent(c)}`), 2),
           [editBackButton()],
         ]),
       ]);
@@ -411,7 +413,7 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
       await setState(ctx, EditProfileStates.SPORT, {});
       await editButtons(ctx, TXT.profile.select_sport, [
         Keyboard.inlineKeyboard([
-          ...chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `edit_sport_${encodeURIComponent(s)}`), 2),
+          ...sportButtonRows((s) => Keyboard.button.callback(s, `edit_sport_${encodeURIComponent(s)}`)),
           [editBackButton()],
         ]),
       ]);

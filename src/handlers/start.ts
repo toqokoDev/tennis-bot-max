@@ -84,7 +84,7 @@ export async function handleStartPayload(ctx: AppContext, payload?: string | nul
 
 export function registerStartHandlers(bot: Bot<AppContext>): void {
   const start = async (ctx: AppContext) => {
-    beginCommandResponse(ctx);
+    await beginCommandResponse(ctx);
     const text = getMessageText(ctx);
     const payload = ctx.startPayload ?? text?.split(/\s+/)[1] ?? null;
     await handleStartPayload(ctx, payload);

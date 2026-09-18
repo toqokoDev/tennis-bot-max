@@ -8,7 +8,8 @@ import type { AttachmentRequest } from '@maxhub/max-bot-api/types';
 import { env } from '../config/env.js';
 import { storage } from '../storage/jsonStorage.js';
 import type { Tournament } from '../types/models.js';
-import type { BracketMatch, BracketTree } from '../utils/bracket/index.js';
+import { generateOlympicBracket, type BracketMatch, type BracketTree } from '../utils/bracket/index.js';
+import { ensureSeeding } from '../utils/tournamentLifecycle.js';
 import { logger } from '../logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -97,7 +98,14 @@ async function buildPayload(tourn: Tournament): Promise<Record<string, unknown>>
       };
     });
 
-  const rounds = roundsFromBracket(tourn.bracket as unknown as BracketTree | undefined);
+  // Пока турнир не стартовал официально, tourn.bracket ещё не сохранён — строим
+  // предпросмотр сетки по уже заявленным участникам, чтобы сетка была видна сразу,
+  // а не только после набора минимума и явного запуска турнира.
+  const savedBracket = tourn.bracket as unknown as BracketTree | undefined;
+  const previewBracket = !savedBracket && tourn.type === 'Олимпийская система'
+    ? generateOlympicBracket(ensureSeeding(tourn).map(Number))
+    : undefined;
+  const rounds = roundsFromBracket(savedBracket ?? previewBracket);
 
   return {
     name: tourn.name,

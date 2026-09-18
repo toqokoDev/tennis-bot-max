@@ -2,12 +2,12 @@ import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getCtxUserId } from '../context.js';
-import { COUNTRIES, SPORTS, calculateAge } from '../config/profile.js';
+import { COUNTRIES, calculateAge } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { getStateData, setState } from '../middleware/session.js';
 import { AllPlayersStates } from '../types/states.js';
 import type { SportType, UserProfile } from '../types/models.js';
-import { chunkButtons, paginate, showCurrentMessage } from '../utils/bot.js';
+import { paginate, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import {
   countPlayersByField,
@@ -112,7 +112,7 @@ function formatPlayerLabel(user: UserProfile): string {
 async function showSportSelection(ctx: AppContext): Promise<void> {
   const rows: ReturnType<typeof Keyboard.button.callback>[][] = [
     [Keyboard.button.callback(TXT.search.all_sports, 'players_sport_any')],
-    ...chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `players_sport_${encodeURIComponent(s)}`), 2),
+    ...sportButtonRows((s) => Keyboard.button.callback(s, `players_sport_${encodeURIComponent(s)}`)),
     [Keyboard.button.callback(TXT.common.back, 'menu:more')],
   ];
   await showCurrentMessage(ctx, TXT.players_search.choose_sport, {

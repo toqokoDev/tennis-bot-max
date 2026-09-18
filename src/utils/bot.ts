@@ -1,22 +1,25 @@
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AttachmentRequest } from '@maxhub/max-bot-api/types';
 import type { AppContext } from '../context.js';
-import { getCtxUserId } from '../context.js';
 import { getPrevMessageId, setPrevMessageId, clearPrevMessageId } from '../middleware/session.js';
-import { calculateAge, getSportCategory, hasCourtPayment, hasVacation } from '../config/profile.js';
+import { calculateAge, getSportCategory, hasCourtPayment, hasVacation, SPORT_ROWS } from '../config/profile.js';
 import { saveProfileViewContext } from './gameHistory.js';
 import { fullName } from './gameResult.js';
-import { env, isAdmin } from '../config/env.js';
 import { TXT, fmt, MENU_LABELS } from '../texts.js';
-import type { UserProfile } from '../types/models.js';
+import type { SportType, UserProfile } from '../types/models.js';
 
 type ReplyExtra = {
   format?: 'html' | 'markdown';
   attachments?: AttachmentRequest[];
 };
 
-/** Сброс якоря сообщения — перед ответом на команду (/start, меню и т.д.) */
-export function beginCommandResponse(ctx: AppContext): void {
+/**
+ * Перед ответом на команду (/start, меню и т.д.): убрать кнопки у прошлого якорного
+ * сообщения (оно больше не актуально) и сбросить якорь, чтобы новый ответ не редактировал
+ * чужое по смыслу сообщение, а начал новый.
+ */
+export async function beginCommandResponse(ctx: AppContext): Promise<void> {
+  await clearPrevMessageButtons(ctx);
   clearPrevMessageId(ctx);
 }
 
@@ -46,6 +49,34 @@ export function chunkButtons<T>(
   return rows;
 }
 
+/**
+ * Как chunkButtons, но добавляет trailing-пункт (например «Другая страна» / «Другой город»)
+ * отдельной последней строкой, а не парой с последним обычным пунктом — так кнопка выглядит
+ * по центру, а не прижатой к соседу.
+ */
+export function chunkButtonsTrailing<T>(
+  items: T[],
+  trailing: T,
+  mapFn: (item: T) => ReturnType<typeof Keyboard.button.callback>,
+  perRow = 2,
+): ReturnType<typeof Keyboard.button.callback>[][] {
+  const rows = chunkButtons(items, mapFn, perRow);
+  rows.push([mapFn(trailing)]);
+  return rows;
+}
+
+/**
+ * Единая раскладка кнопок видов спорта (SPORT_ROWS из config/profile.ts) — используется
+ * везде, где пользователь выбирает вид спорта, чтобы сетка кнопок была одинаковой на всех
+ * экранах. Кнопки вроде «Все виды спорта» / «Назад» / «Главное меню» в неё не входят —
+ * их добавляют отдельными рядами до/после.
+ */
+export function sportButtonRows(
+  mapFn: (sport: SportType) => ReturnType<typeof Keyboard.button.callback>,
+): ReturnType<typeof Keyboard.button.callback>[][] {
+  return SPORT_ROWS.map((row) => row.map(mapFn));
+}
+
 /** Новое сообщение — запрос текстового ввода (вне регистрации и FSM) */
 export async function askText(ctx: AppContext, text: string, extra?: ReplyExtra): Promise<void> {
   await ctx.reply(text, extra);
@@ -67,26 +98,25 @@ export async function clearPrevMessageButtons(ctx: AppContext): Promise<void> {
   }
 }
 
-/** Новое сообщение после ввода пользователя — у предыдущего убираются кнопки */
+/**
+ * Новое сообщение после ввода пользователя.
+ * Кнопки у предыдущего якорного сообщения убираются автоматически внутри AppContext.reply().
+ */
 export async function replyText(ctx: AppContext, text: string, extra?: ReplyExtra): Promise<string> {
-  await clearPrevMessageButtons(ctx);
   const msg = await ctx.reply(text, {
     format: extra?.format ?? 'html',
     ...extra,
   });
-  const mid = msg.body.mid;
-  await setPrevMessageId(ctx, mid);
-  return mid;
+  return msg.body.mid;
 }
 
-/** Новое сообщение с кнопками после ввода пользователя */
+/** Новое сообщение с кнопками после ввода пользователя (кнопки прошлого шага убираются в ctx.reply()) */
 export async function replyButtons(
   ctx: AppContext,
   text: string,
   attachments: AttachmentRequest[],
   extra?: Omit<ReplyExtra, 'attachments'>,
 ): Promise<string> {
-  await clearPrevMessageButtons(ctx);
   return askButtons(ctx, text, attachments, extra);
 }
 
@@ -111,7 +141,7 @@ export async function promptButtons(
   return replyButtons(ctx, text, attachments, extra);
 }
 
-/** Новое сообщение — шаг с inline-кнопками (после текстового ввода) */
+/** Новое сообщение — шаг с inline-кнопками (после текстового ввода; кнопки прошлого шага убираются в ctx.reply()) */
 export async function askButtons(
   ctx: AppContext,
   text: string,
@@ -122,9 +152,7 @@ export async function askButtons(
     format: extra?.format ?? 'html',
     attachments,
   });
-  const mid = msg.body.mid;
-  await setPrevMessageId(ctx, mid);
-  return mid;
+  return msg.body.mid;
 }
 
 function resolveEditMessageId(ctx: AppContext): string | undefined {
@@ -241,7 +269,7 @@ export function formatProfileText(profile: UserProfile): string {
     lines.push('', `💳 Оплата корта: ${formatPaymentLabel(profile.default_payment)}`);
   }
 
-  if (profile.profile_comment) lines.push('', profile.profile_comment);
+  if (profile.profile_comment) lines.push('', TXT.profile.about_label, profile.profile_comment);
   if (profile.vacation_tennis && profile.vacation_city) {
     lines.push(`✈️ ${profile.vacation_country} ${profile.vacation_city} ${profile.vacation_start}-${profile.vacation_end}`);
   }
@@ -255,9 +283,9 @@ export function formatProfileText(profile: UserProfile): string {
 
 export function profileKeyboard(
   profile: UserProfile,
-  options: { isOwn?: boolean; listBackPayload?: string; reopenPayload?: string; viewerId?: number } = {},
+  options: { isOwn?: boolean; listBackPayload?: string; reopenPayload?: string } = {},
 ): AttachmentRequest[] {
-  const { isOwn = false, listBackPayload, viewerId } = options;
+  const { isOwn = false, listBackPayload } = options;
   const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
 
   if (isOwn) {
@@ -284,23 +312,6 @@ export function profileKeyboard(
     }
   }
 
-  if (viewerId && isAdmin(viewerId)) {
-    const id = profile.max_user_id;
-    buttons.push([
-      Keyboard.button.callback(TXT.admin.delete_user, `admin_select_user:${id}`),
-      Keyboard.button.callback(TXT.admin.manage_subscription, `admin_select_subscription:${id}`),
-    ]);
-    buttons.push([
-      Keyboard.button.callback(TXT.admin.ban, `admin_ban_user:${id}`),
-      Keyboard.button.callback(TXT.admin.delete_vacation, `admin_confirm_delete_vacation:${id}`),
-    ]);
-    if (!isOwn) {
-      buttons.push([
-        Keyboard.button.callback(TXT.admin.edit_other_profile, `admin_edit_profile:${id}`),
-      ]);
-    }
-  }
-
   if (listBackPayload) {
     buttons.push([Keyboard.button.callback(TXT.common.back, listBackPayload)]);
   }
@@ -320,9 +331,8 @@ export async function showProfile(
 ): Promise<void> {
   const { mode = 'edit', ...keyboardOptions } = options;
   saveProfileViewContext(ctx, profile, keyboardOptions);
-  const viewerId = getCtxUserId(ctx);
   const text = formatProfileText(profile);
-  const attachments = profileKeyboard(profile, { ...keyboardOptions, viewerId });
+  const attachments = profileKeyboard(profile, keyboardOptions);
 
   if (profile.photo_path) {
     attachments.unshift({

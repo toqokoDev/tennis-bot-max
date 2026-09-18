@@ -9,14 +9,13 @@ import {
   GAME_TYPES,
   MOSCOW_DISTRICTS,
   PAYMENT_TYPES,
-  SPORTS,
   getSportCategory,
 } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { GameOfferStates } from '../types/states.js';
 import type { GameOffer, SportType } from '../types/models.js';
-import { backButton, chunkButtons, showCurrentMessage } from '../utils/bot.js';
+import { backButton, chunkButtons, chunkButtonsTrailing, editText, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
 import {
   buildOfferDateButtons,
   buildOfferTimeButtons,
@@ -156,15 +155,15 @@ async function promptStep(ctx: AppContext, data: OfferData, mode: 'new' | 'edit'
     case 'sport':
       await showCurrentMessage(ctx, TXT.game_offers.choose_sport, {
         attachments: [Keyboard.inlineKeyboard(
-          chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `gamesport_${encodeURIComponent(s)}`), 2),
+          sportButtonRows((s) => Keyboard.button.callback(s, `gamesport_${encodeURIComponent(s)}`)),
         )],
       }, mode);
       break;
     case 'country': {
-      const countries = [...Object.keys(COUNTRIES), TXT.registration.other_country];
+      const countries = Object.keys(COUNTRIES);
       await showCurrentMessage(ctx, fmt(TXT.game_offers.choose_country, { sport: data.sport! }), {
         attachments: [Keyboard.inlineKeyboard(
-          chunkButtons(countries, (c) => Keyboard.button.callback(c, `gamecountry_${encodeURIComponent(c)}`), 2),
+          chunkButtonsTrailing(countries, TXT.registration.other_country, (c) => Keyboard.button.callback(c, `gamecountry_${encodeURIComponent(c)}`), 2),
         )],
       }, mode);
       break;
@@ -172,10 +171,10 @@ async function promptStep(ctx: AppContext, data: OfferData, mode: 'new' | 'edit'
     case 'city': {
       const country = data.country ?? (await requireRegistered(ctx))?.country ?? '🇷🇺 Россия';
       data.country = country;
-      const cities = [...(COUNTRIES[country] ?? []), TXT.registration.other_city];
+      const cities = COUNTRIES[country] ?? [];
       await showCurrentMessage(ctx, fmt(TXT.game_offers.choose_city, { country }), {
         attachments: [Keyboard.inlineKeyboard(
-          chunkButtons(cities, (c) => Keyboard.button.callback(c, `gamecity_${encodeURIComponent(c)}`), 2),
+          chunkButtonsTrailing(cities, TXT.registration.other_city, (c) => Keyboard.button.callback(c, `gamecity_${encodeURIComponent(c)}`), 2),
         )],
       }, mode);
       break;
@@ -415,7 +414,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     if (raw === TXT.registration.other_country) {
       data.step = 'country';
       await setState(ctx, GameOfferStates.GAME_COUNTRY_INPUT, data);
-      await showCurrentMessage(ctx, TXT.registration.enter_country, {}, 'new');
+      await editText(ctx, TXT.registration.enter_country);
       return;
     }
     data.country = raw;
@@ -429,7 +428,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
     if (raw === TXT.registration.other_city) {
       data.step = 'city';
       await setState(ctx, GameOfferStates.GAME_CITY_INPUT, data);
-      await showCurrentMessage(ctx, TXT.registration.enter_city, {}, 'new');
+      await editText(ctx, TXT.registration.enter_city);
       return;
     }
     data.city = raw;
@@ -447,7 +446,7 @@ export function registerGameOfferHandlers(bot: import('@maxhub/max-bot-api').Bot
   onOfferAction(bot, 'gamedate_manual', async (ctx) => {
     const data = getStateData<OfferData>(ctx);
     await setState(ctx, GameOfferStates.GAME_DATE_MANUAL, data);
-    await showCurrentMessage(ctx, TXT.game_offers.enter_date, {}, 'new');
+    await editText(ctx, TXT.game_offers.enter_date);
   });
 
   onOfferAction(bot, /^gamedate_/, async (ctx) => {

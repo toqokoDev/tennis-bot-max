@@ -2,12 +2,12 @@ import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getMessageText } from '../context.js';
-import { COUNTRIES, SPORTS } from '../config/profile.js';
+import { COUNTRIES } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseToursStates, CreateTourStates } from '../types/states.js';
 import type { SportType, UserProfile } from '../types/models.js';
-import { chunkButtons, showCurrentMessage, askText, editText, editButtons, replyButtons } from '../utils/bot.js';
+import { chunkButtons, showCurrentMessage, askText, editText, editButtons, replyButtons, sportButtonRows } from '../utils/bot.js';
 import {
   isValidDate,
   isFutureOrTodayDate,
@@ -148,7 +148,7 @@ export function registerToursHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     await setState(ctx, BrowseToursStates.SELECT_SPORT, {});
     await showCurrentMessage(ctx, TXT.tours.choose_sport, {
       attachments: [Keyboard.inlineKeyboard(
-        chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `toursport_${encodeURIComponent(s)}`), 2),
+        sportButtonRows((s) => Keyboard.button.callback(s, `toursport_${encodeURIComponent(s)}`)),
       )],
     });
   });

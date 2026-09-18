@@ -1,5 +1,5 @@
 import type { SportType } from '../types/models.js';
-import { SPORTS } from './profile.js';
+import { SPORTS, SPORT_ROWS } from './profile.js';
 
 export const TOURNAMENT_TYPES = ['Олимпийская система', 'Круговая'] as const;
 
@@ -69,14 +69,10 @@ export const TOURNAMENT_SPORTS: SportType[] = SPORTS.filter(
   (s) => !EXCLUDED_TOURNAMENT_SPORTS.has(s),
 );
 
-/** Раскладка кнопок спорта как в TennisBot create_sport_keyboard */
-export const TOURNAMENT_SPORT_ROWS: SportType[][] = [
-  ['🎾Большой теннис', '🏓Настольный теннис'],
-  ['🏸Бадминтон', '🏖️Пляжный теннис'],
-  ['🎾Падл-теннис', '🥎Сквош'],
-  ['🏆Пиклбол', '⛳Гольф', '🏃‍♂️‍➡️Бег'],
-  ['🏋️‍♀️Фитнес', '🚴Вело'],
-].map((row) => row.filter((s) => !EXCLUDED_TOURNAMENT_SPORTS.has(s)) as SportType[]);
+/** Раскладка кнопок спорта для турниров — та же сетка, что и везде (SPORT_ROWS), без недоступных для турниров видов. */
+export const TOURNAMENT_SPORT_ROWS: SportType[][] = SPORT_ROWS
+  .map((row) => row.filter((s) => !EXCLUDED_TOURNAMENT_SPORTS.has(s)) as SportType[])
+  .filter((row) => row.length > 0);
 
 export const PAYMENT_WINDOW_HOURS = 24;
 

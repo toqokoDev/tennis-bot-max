@@ -97,7 +97,6 @@ type CardNav = {
 
 type CardShowOptions = {
   mode?: 'new' | 'edit';
-  withImage?: boolean;
 };
 
 type Btn = ReturnType<typeof Keyboard.button.callback>;
@@ -108,6 +107,13 @@ function mainMenuRow(): Btn[] {
 
 function withMainMenu(rows: Btn[][]): Btn[][] {
   return [...rows, mainMenuRow()];
+}
+
+function tournamentNotFoundKeyboard() {
+  return Keyboard.inlineKeyboard([
+    [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
+    mainMenuRow(),
+  ]);
 }
 
 function tournamentSportKeyboard(prefix: string): Btn[][] {
@@ -209,9 +215,6 @@ export async function showTournamentMenu(ctx: AppContext): Promise<void> {
     [Keyboard.button.callback(TXT.tournament.list, 'tournament_list')],
     [Keyboard.button.callback(TXT.tournament.my, 'tournament_my')],
   ];
-  if (isAdmin(user.max_user_id)) {
-    buttons.push([Keyboard.button.callback(TXT.tournament.create, 'create_tournament')]);
-  }
   buttons.push(mainMenuRow());
   await showCurrentMessage(ctx, fmt(TXT.tournament.menu, { active_count: activeCount }), {
     attachments: [Keyboard.inlineKeyboard(buttons)],
@@ -428,19 +431,27 @@ async function applyProposedTournament(ctx: AppContext): Promise<void> {
   buttons.push([Keyboard.button.callback(TXT.tournament.all_tournaments, 'tournament_list')]);
   buttons.push(mainMenuRow());
 
+  let bracketImage: import('@maxhub/max-bot-api/types').AttachmentRequest | null = null;
+  try {
+    bracketImage = await uploadBracketImage(ctx.api, tourn);
+  } catch {
+    /* keep card without image */
+  }
+  const keyboard = Keyboard.inlineKeyboard(buttons);
+
   await showCurrentMessage(ctx, fmt(TXT.tournament.applied_success, {
     name: tourn.name,
     current: count,
     total: tourn.participants_count,
   }), {
-    attachments: [Keyboard.inlineKeyboard(buttons)],
+    attachments: bracketImage ? [bracketImage, keyboard] : [keyboard],
   });
 }
 
 async function showMyTournaments(
   ctx: AppContext,
   page = 0,
-  opts: CardShowOptions = { mode: 'edit', withImage: true },
+  opts: CardShowOptions = { mode: 'edit' },
 ): Promise<void> {
   const user = await requireRegistered(ctx);
   if (!user) return;
@@ -469,7 +480,7 @@ async function showMyTournaments(
 export async function handleViewTournament(ctx: AppContext, id: string): Promise<void> {
   const tourn = await storage.getTournament(id);
   if (!tourn) {
-    await ctx.reply(TXT.tournament.not_found);
+    await ctx.reply(TXT.tournament.not_found, { attachments: [tournamentNotFoundKeyboard()] });
     return;
   }
   const data = getStateData<ViewData>(ctx);
@@ -505,19 +516,21 @@ export async function handleJoinTournament(
   }
   let tourn = await storage.getTournament(id);
 
-  const notify = async (text: string): Promise<void> => {
+  const notify = async (
+    text: string,
+    extra?: { attachments?: import('@maxhub/max-bot-api/types').AttachmentRequest[] },
+  ): Promise<void> => {
     if (fromDeepLink || !ctx.callback) {
-      await ctx.reply(text);
+      await ctx.reply(text, extra);
     } else {
       await ctx.answerOnCallback({ notification: text });
     }
   };
 
-  const showCard = async (t: typeof tourn, withImage = true): Promise<void> => {
+  const showCard = async (t: typeof tourn): Promise<void> => {
     if (!t) return;
     await showTournamentCard(ctx, t, undefined, {
       mode: fromDeepLink || !ctx.callback ? 'new' : 'edit',
-      withImage,
     });
   };
 
@@ -541,10 +554,10 @@ export async function handleJoinTournament(
         user_sport: user.sport || '',
       }),
     };
-    await notify(messages[block]);
+    await notify(messages[block], block === 'not_found' ? { attachments: [tournamentNotFoundKeyboard()] } : undefined);
     if (tourn && (block === 'already_registered' || block === 'full' || block === 'level'
       || block === 'gender' || block === 'age' || block === 'category' || block === 'sport')) {
-      await showCard(tourn, Boolean(fromDeepLink || !ctx.callback));
+      await showCard(tourn);
     }
     return;
   }
@@ -575,12 +588,12 @@ export async function handleJoinTournament(
 
   if (fromDeepLink || !ctx.callback) {
     await ctx.reply(TXT.tournament.joined);
-    await showTournamentCard(ctx, cardTourn, nav, { mode: 'new', withImage: true });
+    await showTournamentCard(ctx, cardTourn, nav, { mode: 'new' });
     return;
   }
 
   await ctx.answerOnCallback({ notification: TXT.tournament.joined });
-  await showTournamentCard(ctx, cardTourn, nav, { mode: 'edit', withImage: true });
+  await showTournamentCard(ctx, cardTourn, nav, { mode: 'edit' });
 }
 
 export async function handlePayTournament(ctx: AppContext, id: string): Promise<void> {
@@ -588,7 +601,7 @@ export async function handlePayTournament(ctx: AppContext, id: string): Promise<
   if (!user) return;
   const tourn = await storage.getTournament(id);
   if (!tourn) {
-    await ctx.reply(TXT.tournament.not_found);
+    await ctx.reply(TXT.tournament.not_found, { attachments: [tournamentNotFoundKeyboard()] });
     return;
   }
   if (!tourn.participants[String(user.max_user_id)]) {
@@ -720,7 +733,7 @@ async function confirmTournamentPayment(ctx: AppContext, tournamentId: string): 
   }
   const tourn = await storage.getTournament(tournamentId);
   if (!tourn) {
-    await ctx.reply(TXT.tournament.not_found);
+    await ctx.reply(TXT.tournament.not_found, { attachments: [tournamentNotFoundKeyboard()] });
     return;
   }
   const userId = getCtxUserId(ctx);
@@ -745,7 +758,6 @@ async function showTournamentCard(
   opts: CardShowOptions = {},
 ): Promise<void> {
   const mode = opts.mode ?? 'edit';
-  const withImage = opts.withImage ?? mode === 'new';
 
   const count = Object.keys(tourn.participants).length;
   let text = fmt(TXT.tournament.card, {
@@ -798,9 +810,6 @@ async function showTournamentCard(
       buttons.push([Keyboard.button.callback(TXT.payments.check, `tournament_pay_check:${tourn.id}`)]);
     }
   }
-  if (tourn.status === 'started' && (tourn.bracket || tourn.round_robin) && !tourn.hide_bracket) {
-    buttons.push([Keyboard.button.callback(TXT.tournament.bracket, `view_bracket:${tourn.id}`)]);
-  }
   if (nav?.listMode !== 'my') {
     buttons.push([Keyboard.button.callback(TXT.tournament.my, 'tournament_my')]);
   } else {
@@ -810,12 +819,10 @@ async function showTournamentCard(
 
   const keyboard = Keyboard.inlineKeyboard(buttons);
   let bracketImage: import('@maxhub/max-bot-api/types').AttachmentRequest | null = null;
-  if (withImage) {
-    try {
-      bracketImage = await uploadBracketImage(ctx.api, tourn);
-    } catch {
-      /* keep card without image */
-    }
+  try {
+    bracketImage = await uploadBracketImage(ctx.api, tourn);
+  } catch {
+    /* keep card without image */
   }
 
   const attachments = bracketImage ? [bracketImage, keyboard] : [keyboard];
@@ -850,7 +857,7 @@ async function showTournamentCard(
 async function showTournamentList(
   ctx: AppContext,
   data: ViewData,
-  opts: CardShowOptions = { mode: 'edit', withImage: true },
+  opts: CardShowOptions = { mode: 'edit' },
 ): Promise<void> {
   const list = filterBrowseTournaments(await storage.getTournaments(), data);
   if (!list.length) {
@@ -1008,13 +1015,13 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     const data = getStateData<ViewData>(ctx);
     data.page = page;
     data.listMode = 'browse';
-    await showTournamentList(ctx, data, { mode: 'edit', withImage: false });
+    await showTournamentList(ctx, data, { mode: 'edit' });
   });
 
   bot.action(/^tmy_page:/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     const page = Number.parseInt(getCallbackPayload(ctx).replace('tmy_page:', ''), 10) || 0;
-    await showMyTournaments(ctx, page, { mode: 'edit', withImage: false });
+    await showMyTournaments(ctx, page, { mode: 'edit' });
   });
 
   bot.action(/^view_tournament:/, async (ctx) => {
@@ -1040,7 +1047,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: TXT.tournament.left });
 
     const data = getStateData<ViewData>(ctx);
-    const editOpts: CardShowOptions = { mode: 'edit', withImage: false };
+    const editOpts: CardShowOptions = { mode: 'edit' };
 
     if (data.listMode === 'my') {
       const list = await resolveTournamentList(ctx, { listMode: 'my' });
@@ -1096,28 +1103,6 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     await ctx.answerOnCallback({ notification: 'OK' });
     const id = getCallbackPayload(ctx).replace('tournament_pay_check:', '');
     await confirmTournamentPayment(ctx, id);
-  });
-
-  bot.action(/^view_bracket:/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    const id = getCallbackPayload(ctx).replace('view_bracket:', '');
-    const tourn = await storage.getTournament(id);
-    if (!tourn) {
-      await ctx.reply(TXT.tournament.not_found);
-      return;
-    }
-    const bracketImage = await uploadBracketImage(ctx.api, tourn);
-    if (bracketImage) {
-      await ctx.reply(TXT.tournament.bracket, { attachments: [bracketImage] });
-    } else {
-      await ctx.reply(TXT.tournament.bracket_unavailable);
-    }
-  });
-
-  bot.action('create_tournament', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    if (!isAdmin(getCtxUserId(ctx))) return;
-    await startCreateTournament(ctx);
   });
 
   bot.action('admin_create_tournament', async (ctx) => {

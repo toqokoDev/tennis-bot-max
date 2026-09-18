@@ -2,12 +2,12 @@ import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getCtxUserId, getMessageText } from '../context.js';
-import { SPORTS, getSportCategory } from '../config/profile.js';
+import { getSportCategory } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseOffersStates } from '../types/states.js';
 import type { GameOffer, SportType, UserProfile } from '../types/models.js';
-import { chunkButtons, paginate, showCurrentMessage } from '../utils/bot.js';
+import { paginate, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
 import { notifyUser } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -126,7 +126,6 @@ function emptyBrowseKeyboard(sport: SportType, backPayload: string): ReturnType<
     [Keyboard.button.callback(TXT.game_offers.browse_offer_game, `new_offer_${encodeURIComponent(sport)}`)],
     [Keyboard.button.callback(TXT.profile.my_offers, 'my_offers')],
     [Keyboard.button.callback(TXT.game_offers.browse_back_sport, backPayload)],
-    [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
   ]);
 }
 
@@ -135,7 +134,6 @@ function emptyCityKeyboard(sport: SportType): ReturnType<typeof Keyboard.inlineK
     [Keyboard.button.callback(TXT.game_offers.browse_offer_game, `new_offer_${encodeURIComponent(sport)}`)],
     [Keyboard.button.callback(TXT.profile.my_offers, 'my_offers')],
     [Keyboard.button.callback(TXT.game_offers.browse_back_city, 'browse_back_city')],
-    [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
   ]);
 }
 
@@ -143,7 +141,7 @@ export async function startBrowseOffers(ctx: AppContext): Promise<void> {
   const user = await requireRegistered(ctx);
   if (!user) return;
   await setState(ctx, BrowseOffersStates.SELECT_SPORT, { page: 1 });
-  const sportRows = chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `offersport_${encodeURIComponent(s)}`), 2);
+  const sportRows = sportButtonRows((s) => Keyboard.button.callback(s, `offersport_${encodeURIComponent(s)}`));
   sportRows.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
   const mode = ctx.callback ? 'edit' : 'new';
   await showCurrentMessage(ctx, TXT.game_offers.browse_sport, {
@@ -197,7 +195,6 @@ async function showCitySelection(ctx: AppContext, data: BrowseData): Promise<voi
         [Keyboard.button.callback(TXT.game_offers.browse_offer_game, `new_offer_${encodeURIComponent(data.sport!)}`)],
         [Keyboard.button.callback(TXT.profile.my_offers, 'my_offers')],
         [Keyboard.button.callback(TXT.game_offers.browse_back_country, 'browse_back_country')],
-        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
       ])],
     });
     return;

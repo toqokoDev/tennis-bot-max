@@ -1,22 +1,25 @@
 import { Keyboard } from '@maxhub/max-bot-api';
-import type { AttachmentRequest } from '@maxhub/max-bot-api/types';
+import type { Attachment, AttachmentRequest, MessageBody } from '@maxhub/max-bot-api/types';
 import { TXT, fmt } from '../texts.js';
 import type { AppContext } from '../context.js';
-import { getCtxUserId, getMessageText } from '../context.js';
-import { isAdmin } from '../config/env.js';
+import { getCtxUserId } from '../context.js';
+import { env, isAdmin } from '../config/env.js';
 import { calculateLevelFromPoints } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { AdminBroadcastStates, AdminSubscriptionStates } from '../types/states.js';
-import type { BannedUser, CompletedGame, SubscriptionInfo, UserProfile } from '../types/models.js';
+import type { BannedUser, CompletedGame, UserProfile } from '../types/models.js';
 import {
   askText,
   beginCommandResponse,
   showCurrentMessage,
 } from '../utils/bot.js';
+import { showUserAdminCard } from '../utils/adminUsers.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { addDays, formatDateISO, isValidEmail } from '../utils/validation.js';
 import { showEditProfileMenu } from './profileEdit.js';
+
+const USERS_PAGE_SIZE = 15;
 
 type BroadcastData = {
   text?: string;
@@ -45,6 +48,7 @@ async function requireAdmin(ctx: AppContext): Promise<boolean> {
 
 function adminKeyboard(): AttachmentRequest {
   return Keyboard.inlineKeyboard([
+    [Keyboard.button.callback(TXT.admin.manage_users, 'admin_users_list:0')],
     [Keyboard.button.callback(TXT.admin.banned_list, 'admin_banned_list')],
     [Keyboard.button.callback(TXT.admin.broadcast, 'admin_broadcast_menu')],
     [Keyboard.button.callback(TXT.admin.manage_subscriptions, 'admin_manage_subscription_menu')],
@@ -52,6 +56,45 @@ function adminKeyboard(): AttachmentRequest {
     [Keyboard.button.callback(TXT.admin.edit_tournaments, 'admin_edit_tournaments')],
     [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
   ]);
+}
+
+function userListButtonLabel(id: string, user: UserProfile): string {
+  let name = `${user.first_name} ${user.last_name}`.trim() || id;
+  if (name.length > 25) name = `${name.slice(0, 22)}…`;
+  const subIcon = user.subscription?.active ? '🔔' : '';
+  return `👤 ${name}${subIcon ? ` ${subIcon}` : ''}`;
+}
+
+async function showUsersList(ctx: AppContext, page = 0): Promise<void> {
+  const users = await storage.getUsers();
+  const entries = Object.entries(users).sort(([, a], [, b]) => {
+    const nameA = `${a.first_name} ${a.last_name}`.trim().toLowerCase();
+    const nameB = `${b.first_name} ${b.last_name}`.trim().toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+  if (!entries.length) {
+    await showCurrentMessage(ctx, TXT.admin.users_empty, { attachments: [backToAdminKeyboard()] });
+    return;
+  }
+
+  const totalPages = Math.max(1, Math.ceil(entries.length / USERS_PAGE_SIZE));
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const slice = entries.slice(safePage * USERS_PAGE_SIZE, (safePage + 1) * USERS_PAGE_SIZE);
+
+  const buttons: ReturnType<typeof Keyboard.button.callback>[][] = slice.map(([id, user]) => [
+    Keyboard.button.callback(userListButtonLabel(id, user), `admin_user_card:${id}:${safePage}`),
+  ]);
+  const nav: ReturnType<typeof Keyboard.button.callback>[] = [];
+  if (safePage > 0) nav.push(Keyboard.button.callback('⬅️', `admin_users_list:${safePage - 1}`));
+  if (safePage < totalPages - 1) nav.push(Keyboard.button.callback('➡️', `admin_users_list:${safePage + 1}`));
+  if (nav.length) buttons.push(nav);
+  buttons.push([Keyboard.button.callback(TXT.admin.back_to_main, 'admin_back_to_main')]);
+
+  await showCurrentMessage(ctx, fmt(TXT.admin.users_list_title, {
+    total: entries.length,
+    page: safePage + 1,
+    pages: totalPages,
+  }), { attachments: [Keyboard.inlineKeyboard(buttons)] });
 }
 
 function backToAdminKeyboard(): AttachmentRequest {
@@ -115,28 +158,41 @@ async function removeUserCompletely(userId: number): Promise<UserProfile | undef
   return user;
 }
 
+/**
+ * При пересылке (forward) сообщения боту MAX кладёт исходный текст/медиа в
+ * ctx.message.link.message, а не в ctx.message.body — тело "обёртки" почти
+ * всегда пустое. Без этого разбора рассылка через "переслать сообщение"
+ * подхватывала бы только подпись, добавленную поверх форварда, а фото/файл/
+ * стикер из самого пересланного сообщения молча терялись.
+ */
+function getBroadcastSourceBody(ctx: AppContext): MessageBody | undefined {
+  return ctx.message?.link?.message ?? ctx.message?.body;
+}
+
+function getBroadcastText(ctx: AppContext): string | undefined {
+  return getBroadcastSourceBody(ctx)?.text?.trim() || undefined;
+}
+
 function getMessageAttachments(ctx: AppContext): AttachmentRequest[] {
-  const attachments = ctx.message?.body.attachments;
+  const attachments = getBroadcastSourceBody(ctx)?.attachments;
   if (!attachments?.length) return [];
   const out: AttachmentRequest[] = [];
-  for (const a of attachments) {
-    if (a.type === 'image' && a.payload?.url) {
-      out.push({ type: 'image', payload: { url: a.payload.url } });
-    } else if (a.type === 'video' && 'token' in (a.payload ?? {}) && (a.payload as { token?: string }).token) {
-      out.push({ type: 'video', payload: { token: (a.payload as { token: string }).token } });
+  for (const a of attachments as Attachment[]) {
+    const token = (a as { payload?: { token?: string } }).payload?.token;
+    if (a.type === 'image') {
+      if (a.payload?.url) out.push({ type: 'image', payload: { url: a.payload.url } });
+      else if (token) out.push({ type: 'image', payload: { token } });
+    } else if (a.type === 'video' && token) {
+      out.push({ type: 'video', payload: { token } });
+    } else if (a.type === 'audio' && token) {
+      out.push({ type: 'audio', payload: { token } });
+    } else if (a.type === 'file' && token) {
+      out.push({ type: 'file', payload: { token } });
+    } else if (a.type === 'sticker') {
+      out.push({ type: 'sticker', payload: { code: a.payload.code } });
     }
   }
   return out;
-}
-
-function formatSubInfo(sub?: SubscriptionInfo): string {
-  if (!sub) return TXT.admin.sub_none;
-  return fmt(TXT.admin.sub_info, {
-    status: sub.active ? TXT.admin.sub_active : TXT.admin.sub_inactive,
-    until: sub.until || '—',
-    activated: sub.activated || '—',
-    email: sub.email || '—',
-  });
 }
 
 function parseSubscriptionDate(value: string): string | null {
@@ -208,39 +264,6 @@ function subUserButtonLabel(id: string, user: UserProfile): string {
   if (sub?.active) suffix = `✅ ${sub.until || '?'}`;
   else if (sub) suffix = '❌';
   return `🔔 ${name} (${suffix})`;
-}
-
-async function showSubscriptionManagement(ctx: AppContext, userId: string): Promise<boolean> {
-  const users = await storage.getUsers();
-  const user = users[userId];
-  if (!user) {
-    await showCurrentMessage(ctx, TXT.admin.user_not_found, { attachments: [backToAdminKeyboard()] });
-    return false;
-  }
-  const sub = user.subscription;
-  const buttons: ReturnType<typeof Keyboard.button.callback>[][] = [];
-  if (sub) {
-    buttons.push([Keyboard.button.callback(TXT.admin.sub_edit_until, `admin_sub_edit_until:${userId}`)]);
-    buttons.push([Keyboard.button.callback(TXT.admin.sub_edit_activated, `admin_sub_edit_activated:${userId}`)]);
-    buttons.push([Keyboard.button.callback(TXT.admin.sub_edit_email, `admin_sub_edit_email:${userId}`)]);
-    buttons.push([Keyboard.button.callback(
-      sub.active ? TXT.admin.sub_deactivate : TXT.admin.sub_activate,
-      `admin_sub_toggle_active:${userId}`,
-    )]);
-    buttons.push([Keyboard.button.callback(TXT.admin.sub_extend, `admin_sub_extend_30:${userId}`)]);
-    buttons.push([Keyboard.button.callback(TXT.admin.sub_delete, `admin_sub_delete:${userId}`)]);
-  } else {
-    buttons.push([Keyboard.button.callback(TXT.admin.sub_create, `admin_sub_create:${userId}`)]);
-  }
-  buttons.push([Keyboard.button.callback(TXT.admin.back, 'admin_manage_subscription_menu')]);
-
-  await showCurrentMessage(ctx, fmt(TXT.admin.sub_manage_title, {
-    name: `${user.first_name} ${user.last_name}`.trim(),
-    phone: user.phone || '—',
-    id: userId,
-    info: formatSubInfo(sub),
-  }), { attachments: [Keyboard.inlineKeyboard(buttons)] });
-  return true;
 }
 
 async function showSubscriptionSearchResults(ctx: AppContext, page = 0): Promise<void> {
@@ -339,6 +362,14 @@ async function showUnbanMenu(ctx: AppContext): Promise<void> {
 }
 
 
+function mediaPromptKeyboard(data: BroadcastData): AttachmentRequest {
+  const doneLabel = data.media?.length ? TXT.admin.broadcast_media_done : TXT.admin.broadcast_no_photo;
+  return Keyboard.inlineKeyboard([
+    [Keyboard.button.callback(doneLabel, 'admin_broadcast_media_done')],
+    [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
+  ]);
+}
+
 function broadcastPreview(data: BroadcastData): string {
   const parts: string[] = [];
   if (data.media?.length) parts.push(`🖼 Медиа: ${data.media.length}`);
@@ -346,14 +377,19 @@ function broadcastPreview(data: BroadcastData): string {
   return parts.join('\n\n') || '—';
 }
 
-async function showBroadcastConfirm(ctx: AppContext, data: BroadcastData): Promise<void> {
+async function showBroadcastConfirm(
+  ctx: AppContext,
+  data: BroadcastData,
+  mode: 'new' | 'edit' = 'new',
+): Promise<void> {
   await setState(ctx, AdminBroadcastStates.CONFIRM, data);
+  const keyboard = Keyboard.inlineKeyboard([
+    [Keyboard.button.callback(TXT.admin.send_broadcast, 'admin_broadcast_confirm')],
+    [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
+  ]);
   await showCurrentMessage(ctx, fmt(TXT.admin.broadcast_confirm, { preview: broadcastPreview(data) }), {
-    attachments: [Keyboard.inlineKeyboard([
-      [Keyboard.button.callback(TXT.admin.send_broadcast, 'admin_broadcast_confirm')],
-      [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
-    ])],
-  }, 'new');
+    attachments: [...(data.media ?? []), keyboard],
+  }, mode);
 }
 
 async function runBroadcast(ctx: AppContext, data: BroadcastData): Promise<void> {
@@ -361,7 +397,8 @@ async function runBroadcast(ctx: AppContext, data: BroadcastData): Promise<void>
     await showCurrentMessage(ctx, TXT.admin.broadcast_empty, { attachments: [backToAdminKeyboard()] });
     return;
   }
-  const ids = (await storage.listAllUserIds()).filter((id) => !isAdmin(id));
+  const ids = await storage.listAllUserIds();
+  if (env.ADMIN_ID && !ids.includes(env.ADMIN_ID)) ids.push(env.ADMIN_ID);
   let sent = 0;
   const progressMsg = await ctx.reply(fmt(TXT.admin.broadcast_progress, { current: 0, total: ids.length }));
   for (let i = 0; i < ids.length; i++) {
@@ -371,8 +408,8 @@ async function runBroadcast(ctx: AppContext, data: BroadcastData): Promise<void>
         attachments: data.media?.length ? data.media : undefined,
       });
       sent += 1;
-    } catch {
-      /* skip unreachable */
+    } catch (err) {
+      console.error(`[broadcast] failed to send to ${ids[i]}:`, err);
     }
     if ((i + 1) % 10 === 0 || i === ids.length - 1) {
       try {
@@ -395,20 +432,20 @@ async function runBroadcast(ctx: AppContext, data: BroadcastData): Promise<void>
 
 export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<AppContext>): void {
   bot.command(/^admin(?:@[\w]+)?$/i, async (ctx) => {
-    beginCommandResponse(ctx);
+    await beginCommandResponse(ctx);
     if (!(await requireAdmin(ctx))) return;
     await clearState(ctx);
     await showAdminMenu(ctx, 'new');
   });
 
   bot.command(/^banned_users(?:@[\w]+)?$/i, async (ctx) => {
-    beginCommandResponse(ctx);
+    await beginCommandResponse(ctx);
     if (!(await requireAdmin(ctx))) return;
     await showBannedList(ctx);
   });
 
   bot.command(/^unban_user(?:@[\w]+)?$/i, async (ctx) => {
-    beginCommandResponse(ctx);
+    await beginCommandResponse(ctx);
     if (!(await requireAdmin(ctx))) return;
     await showUnbanMenu(ctx);
   });
@@ -425,6 +462,20 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     if (!(await requireAdmin(ctx))) return;
     await clearState(ctx);
     await showCurrentMessage(ctx, TXT.admin.action_cancelled, { attachments: [adminKeyboard()] });
+  });
+
+  bot.action(/^admin_users_list:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    if (!(await requireAdmin(ctx))) return;
+    const page = Number(getCallbackPayload(ctx).replace('admin_users_list:', '')) || 0;
+    await showUsersList(ctx, page);
+  });
+
+  bot.action(/^admin_user_card:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    if (!(await requireAdmin(ctx))) return;
+    const [id, page] = getCallbackPayload(ctx).replace('admin_user_card:', '').split(':');
+    await showUserAdminCard(ctx, id!, `admin_users_list:${page}`);
   });
 
   bot.action('admin_banned_list', async (ctx) => {
@@ -517,12 +568,10 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
   bot.action('admin_broadcast_manual', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     if (!(await requireAdmin(ctx))) return;
-    await setState(ctx, AdminBroadcastStates.MANUAL_MEDIA, { mode: 'manual', media: [] });
+    const data: BroadcastData = { mode: 'manual', media: [] };
+    await setState(ctx, AdminBroadcastStates.MANUAL_MEDIA, data);
     await showCurrentMessage(ctx, TXT.admin.broadcast_media_prompt, {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.broadcast_media_done, 'admin_broadcast_media_done')],
-        [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
-      ])],
+      attachments: [mediaPromptKeyboard(data)],
     });
   });
 
@@ -546,10 +595,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     const data = getStateData<BroadcastData>(ctx);
     await setState(ctx, AdminBroadcastStates.MANUAL_MEDIA, data);
     await showCurrentMessage(ctx, TXT.admin.broadcast_media_prompt, {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.broadcast_media_done, 'admin_broadcast_media_done')],
-        [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
-      ])],
+      attachments: [mediaPromptKeyboard(data)],
     });
   });
 
@@ -558,7 +604,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     if (!(await requireAdmin(ctx))) return;
     const data = getStateData<BroadcastData>(ctx);
     data.text = '';
-    await showBroadcastConfirm(ctx, data);
+    await showBroadcastConfirm(ctx, data, 'edit');
   });
 
   bot.action('admin_broadcast_confirm', async (ctx) => {
@@ -591,7 +637,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     await ctx.answerOnCallback({ notification: 'OK' });
     if (!(await requireAdmin(ctx))) return;
     const userId = getCallbackPayload(ctx).replace('admin_select_subscription:', '');
-    await showSubscriptionManagement(ctx, userId);
+    await showUserAdminCard(ctx, userId, 'admin_manage_subscription_menu');
   });
 
   bot.action(/^admin_sub_edit_until:/, async (ctx) => {
@@ -630,7 +676,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     user.subscription.active = !user.subscription.active;
     if (user.subscription.active) delete user.subscription.expired;
     await storage.saveUser(user);
-    await showSubscriptionManagement(ctx, userId);
+    await showUserAdminCard(ctx, userId);
   });
 
   bot.action(/^admin_sub_extend_30:/, async (ctx) => {
@@ -648,7 +694,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     user.subscription.active = true;
     delete user.subscription.expired;
     await storage.saveUser(user);
-    await showSubscriptionManagement(ctx, userId);
+    await showUserAdminCard(ctx, userId);
   });
 
   bot.action(/^admin_sub_create:/, async (ctx) => {
@@ -667,11 +713,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
       activated: formatDateISO(now),
     };
     await storage.saveUser(user);
-    await showCurrentMessage(ctx, TXT.admin.sub_created, {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.back, `admin_select_subscription:${userId}`)],
-      ])],
-    });
+    await showUserAdminCard(ctx, userId);
   });
 
   bot.action(/^admin_sub_delete:/, async (ctx) => {
@@ -694,11 +736,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     }
     delete user.subscription;
     await storage.saveUser(user);
-    await showCurrentMessage(ctx, TXT.admin.sub_deleted, {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.back, `admin_select_subscription:${userId}`)],
-      ])],
-    });
+    await showUserAdminCard(ctx, userId);
   });
 
 
@@ -808,9 +846,7 @@ export function registerAdminHandlers(bot: import('@maxhub/max-bot-api').Bot<App
     delete user.vacation_city;
     delete user.vacation_district;
     await storage.saveUser(user);
-    await showCurrentMessage(ctx, fmt(TXT.admin.vacation_deleted, { id: userId }), {
-      attachments: [backToAdminKeyboard()],
-    });
+    await showUserAdminCard(ctx, String(userId));
   });
 
   bot.action(/^admin_edit_profile:/, async (ctx) => {
@@ -834,7 +870,7 @@ export async function handleAdminMessage(ctx: AppContext, text: string): Promise
   const state = getState(ctx);
 
   if (state === AdminBroadcastStates.WAIT_FORWARD) {
-    const message = getMessageText(ctx) || text || '';
+    const message = getBroadcastText(ctx) || text || '';
     const media = getMessageAttachments(ctx);
     if (!message && !media.length) {
       await askText(ctx, TXT.admin.broadcast_forward_prompt);
@@ -851,28 +887,19 @@ export async function handleAdminMessage(ctx: AppContext, text: string): Promise
       data.media = [...(data.media ?? []), ...media];
       await setState(ctx, AdminBroadcastStates.MANUAL_MEDIA, data);
       await showCurrentMessage(ctx, `${TXT.admin.broadcast_media_prompt}\n\n🖼 Загружено: ${data.media.length}`, {
-        attachments: [Keyboard.inlineKeyboard([
-          [Keyboard.button.callback(TXT.admin.broadcast_media_done, 'admin_broadcast_media_done')],
-          [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
-        ])],
+        attachments: [mediaPromptKeyboard(data)],
       }, 'new');
       return true;
     }
     await showCurrentMessage(ctx, TXT.admin.broadcast_media_prompt, {
-      attachments: [Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.admin.broadcast_media_done, 'admin_broadcast_media_done')],
-        [Keyboard.button.callback(TXT.admin.broadcast_cancel, 'admin_broadcast_cancel')],
-      ])],
+      attachments: [mediaPromptKeyboard(data)],
     }, 'new');
     return true;
   }
 
   if (state === AdminBroadcastStates.MANUAL_TEXT) {
-    const message = getMessageText(ctx) || text;
-    if (!message) {
-      await askText(ctx, TXT.admin.broadcast_text_prompt);
-      return true;
-    }
+    const message = getBroadcastText(ctx) || text;
+    if (!message) return true;
     const data = getStateData<BroadcastData>(ctx);
     data.text = message;
     await showBroadcastConfirm(ctx, data);
@@ -906,7 +933,7 @@ export async function handleAdminMessage(ctx: AppContext, text: string): Promise
     await storage.saveUser(user);
     await clearState(ctx);
     await ctx.reply(TXT.admin.sub_updated);
-    await showSubscriptionManagement(ctx, String(userId));
+    await showUserAdminCard(ctx, String(userId));
     return true;
   }
 
@@ -928,7 +955,7 @@ export async function handleAdminMessage(ctx: AppContext, text: string): Promise
     await storage.saveUser(user);
     await clearState(ctx);
     await ctx.reply(TXT.admin.sub_updated);
-    await showSubscriptionManagement(ctx, String(userId));
+    await showUserAdminCard(ctx, String(userId));
     return true;
   }
 
@@ -949,7 +976,7 @@ export async function handleAdminMessage(ctx: AppContext, text: string): Promise
     await storage.saveUser(user);
     await clearState(ctx);
     await ctx.reply(TXT.admin.sub_updated);
-    await showSubscriptionManagement(ctx, String(userId));
+    await showUserAdminCard(ctx, String(userId));
     return true;
   }
 

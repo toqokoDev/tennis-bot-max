@@ -11,7 +11,6 @@ import {
   MOSCOW_DISTRICTS,
   PAYMENT_TYPES,
   ROLES,
-  SPORTS,
   getLevelsForSport,
   getSportFieldConfig,
   hasVacation,
@@ -27,6 +26,7 @@ import { RegistrationStates } from '../types/states.js';
 import type { Gender, SportType, UserProfile, UserRole } from '../types/models.js';
 import {
   chunkButtons,
+  chunkButtonsTrailing,
   editButtons,
   editText,
   formatProfileText,
@@ -34,6 +34,7 @@ import {
   profileKeyboard,
   promptButtons,
   promptText,
+  sportButtonRows,
 } from '../utils/bot.js';
 import {
   isValidDate,
@@ -48,11 +49,11 @@ import { processReferralOnRegistration } from '../utils/referral.js';
 
 type RegData = Partial<UserProfile> & { dating_interests_keys?: string[]; level_page?: number };
 
-const REG_COUNTRY_BUTTONS = [...Object.keys(COUNTRIES).slice(0, 5), TXT.registration.other_country];
+const REG_COUNTRY_LIST = Object.keys(COUNTRIES).slice(0, 5);
 
 function sportKeyboard() {
   return Keyboard.inlineKeyboard(
-    chunkButtons(SPORTS, (s) => Keyboard.button.callback(s, `regsport_${encodeURIComponent(s)}`), 2),
+    sportButtonRows((s) => Keyboard.button.callback(s, `regsport_${encodeURIComponent(s)}`)),
   );
 }
 
@@ -85,7 +86,7 @@ async function showLevelsPage(ctx: AppContext, data: RegData, page: number): Pro
   const safePage = Math.min(Math.max(page, 0), totalPages - 1);
   const currentLevels = levelsList.slice(safePage * itemsPerPage, safePage * itemsPerPage + itemsPerPage);
 
-  let text = `🏆 ${fmt(TXT.registration.level_system, { sport: sportNameForLevel(sport) })}:\n\n`;
+  let text = `🏆 ${fmt(TXT.registration.level_system, { sport: sportNameForLevel(sport) })}\n\n`;
   for (const level of currentLevels) {
     text += `${level} — ${levelsDict[level].desc}\n\n`;
   }
@@ -242,8 +243,9 @@ async function askVacationCountry(ctx: AppContext, data: RegData): Promise<void>
   await setState(ctx, RegistrationStates.VACATION_COUNTRY, data);
   await promptButtons(ctx, TXT.registration.vacation_country, [
     Keyboard.inlineKeyboard(
-      chunkButtons(
-        [...Object.keys(COUNTRIES), TXT.registration.other_country],
+      chunkButtonsTrailing(
+        Object.keys(COUNTRIES),
+        TXT.registration.other_country,
         (c) => Keyboard.button.callback(c, `regvaccountry_${encodeURIComponent(c)}`),
         2,
       ),
@@ -261,8 +263,9 @@ async function askVacationCity(ctx: AppContext, data: RegData): Promise<void> {
   await setState(ctx, RegistrationStates.VACATION_CITY, data);
   await promptButtons(ctx, TXT.registration.vacation_city, [
     Keyboard.inlineKeyboard(
-      chunkButtons(
-        [...cities, TXT.registration.other_city],
+      chunkButtonsTrailing(
+        cities,
+        TXT.registration.other_city,
         (c) => Keyboard.button.callback(c, `regvaccity_${encodeURIComponent(c)}`),
         2,
       ),
@@ -355,17 +358,17 @@ async function resumeIncompleteRegistration(ctx: AppContext, data: RegData): Pro
     await setState(ctx, RegistrationStates.COUNTRY, data);
     await promptButtons(ctx, TXT.registration.country, [
       Keyboard.inlineKeyboard(
-        chunkButtons(REG_COUNTRY_BUTTONS, (c) => Keyboard.button.callback(c, `regcountry_${encodeURIComponent(c)}`), 2),
+        chunkButtonsTrailing(REG_COUNTRY_LIST, TXT.registration.other_country, (c) => Keyboard.button.callback(c, `regcountry_${encodeURIComponent(c)}`), 2),
       ),
     ]);
     return false;
   }
   if (!data.city) {
     await setState(ctx, RegistrationStates.CITY, data);
-    const cities = [...(COUNTRIES[data.country] ?? []), TXT.registration.other_city];
+    const cities = COUNTRIES[data.country] ?? [];
     await promptButtons(ctx, TXT.registration.city, [
       Keyboard.inlineKeyboard(
-        chunkButtons(cities, (c) => Keyboard.button.callback(c, `regcity_${encodeURIComponent(c)}`), 2),
+        chunkButtonsTrailing(cities, TXT.registration.other_city, (c) => Keyboard.button.callback(c, `regcity_${encodeURIComponent(c)}`), 2),
       ),
     ]);
     return false;
@@ -459,7 +462,7 @@ async function finishRegistration(ctx: AppContext, data: RegData, userId: number
 
   const profileText = formatProfileText(profile);
   const text = `${TXT.registration.complete}\n\n${profileText}`;
-  const attachments = profileKeyboard(profile, { isOwn: true, viewerId: userId });
+  const attachments = profileKeyboard(profile, { isOwn: true });
   if (profile.photo_path) {
     attachments.unshift({
       type: 'image',
@@ -524,7 +527,7 @@ export async function handleRegistrationMessage(ctx: AppContext): Promise<boolea
     await setState(ctx, RegistrationStates.COUNTRY, data);
     await promptButtons(ctx, TXT.registration.country, [
       Keyboard.inlineKeyboard(
-        chunkButtons(REG_COUNTRY_BUTTONS, (c) => Keyboard.button.callback(c, `regcountry_${encodeURIComponent(c)}`), 2),
+        chunkButtonsTrailing(REG_COUNTRY_LIST, TXT.registration.other_country, (c) => Keyboard.button.callback(c, `regcountry_${encodeURIComponent(c)}`), 2),
       ),
     ]);
     return true;
@@ -691,10 +694,10 @@ export function registerRegistrationHandlers(bot: import('@maxhub/max-bot-api').
     }
     data.country = country;
     await setState(ctx, RegistrationStates.CITY, data);
-    const cities = [...(COUNTRIES[country] ?? []), TXT.registration.other_city];
+    const cities = COUNTRIES[country] ?? [];
     await editButtons(ctx, TXT.registration.city, [
       Keyboard.inlineKeyboard(
-        chunkButtons(cities, (c) => Keyboard.button.callback(c, `regcity_${encodeURIComponent(c)}`), 2),
+        chunkButtonsTrailing(cities, TXT.registration.other_city, (c) => Keyboard.button.callback(c, `regcity_${encodeURIComponent(c)}`), 2),
       ),
     ]);
   });
