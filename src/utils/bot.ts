@@ -352,6 +352,31 @@ export async function showStartWelcome(ctx: AppContext, profile: UserProfile): P
   await askButtons(ctx, formatStartWelcome(profile), [mainMenuKeyboard()]);
 }
 
+const AVATAR_FETCH_TIMEOUT_MS = 5000;
+
+/**
+ * Аватар пользователя из профиля MAX.
+ * В личном диалоге бот+пользователь нужен GET /chats/{chatId} (ctx.getChat()) — поле chat.dialog_with_user
+ * содержит UserWithPhoto собеседника. getChatMembership() (GET /chats/{chatId}/members/me) по документации MAX
+ * отдаёт членство САМОГО БОТА в групповом чате/канале и для диалогов не предназначен — этим объясняется,
+ * что он не возвращал фото пользователя. Таймаут оставлен на случай, если API не ответит вовсе.
+ */
+export async function getMaxProfileAvatarUrl(ctx: AppContext): Promise<string | undefined> {
+  if (!ctx.chatId) return undefined;
+  try {
+    const chat = await Promise.race([
+      ctx.getChat(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('getChat timeout')), AVATAR_FETCH_TIMEOUT_MS);
+      }),
+    ]);
+    const dialogUser = chat.dialog_with_user as { avatar_url?: string; full_avatar_url?: string } | null | undefined;
+    return dialogUser?.full_avatar_url ?? dialogUser?.avatar_url;
+  } catch {
+    return undefined;
+  }
+}
+
 export function paginate<T>(items: T[], page: number, pageSize: number): {
   items: T[];
   page: number;

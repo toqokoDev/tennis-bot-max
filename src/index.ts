@@ -25,17 +25,16 @@ import { clearState } from './middleware/session.js';
 import { getMessageText } from './context.js';
 import { startRegistration } from './handlers/registration.js';
 
-async function main(): Promise<void> {
-  if (!env.BOT_TOKEN) {
-    logger.error('BOT_TOKEN is required');
-    process.exit(1);
-  }
+const POLLING_RETRY_DELAY_MS = 5000;
 
-  await storage.init();
-
-  logger.info('Clearing old webhook subscriptions...');
-  await clearWebhookSubscriptions(env.BOT_TOKEN);
-
+/**
+ * Заводит бота и держит long polling запущенным.
+ * @maxhub/max-bot-api не считает retryable ошибки вида `TypeError: fetch failed`
+ * (обрыв сокета и т.п. — undici кидает их с name="TypeError", а не "FetchError"),
+ * поэтому такие сбои вылетают из bot.start() необработанными и раньше валили весь процесс.
+ * runBot() перезапускает бота при любом падении polling-цикла вместо аварийного завершения.
+ */
+async function runBot(): Promise<Bot<AppContext>> {
   const bot = new Bot<AppContext>(env.BOT_TOKEN, { contextType: AppContext });
 
   bot.use(sessionMiddleware());
@@ -80,18 +79,52 @@ async function main(): Promise<void> {
 
   startBackgroundJobs(bot);
 
+  try {
+    logger.info('Starting Tennis-Play MAX bot (polling)...');
+    await bot.start();
+  } finally {
+    stopBackgroundJobs();
+  }
+
+  return bot;
+}
+
+async function main(): Promise<void> {
+  if (!env.BOT_TOKEN) {
+    logger.error('BOT_TOKEN is required');
+    process.exit(1);
+  }
+
+  await storage.init();
+
+  logger.info('Clearing old webhook subscriptions...');
+  await clearWebhookSubscriptions(env.BOT_TOKEN);
+
+  let shuttingDown = false;
+  let currentBot: Bot<AppContext> | undefined;
+
   const shutdown = (): void => {
     logger.info('Shutting down...');
-    stopBackgroundJobs();
-    bot.stop();
+    shuttingDown = true;
+    currentBot?.stop();
     process.exit(0);
   };
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  logger.info('Starting Tennis-Play MAX bot (polling)...');
-  await bot.start();
+  while (!shuttingDown) {
+    try {
+      currentBot = await runBot();
+      if (shuttingDown) break;
+      logger.warn('Polling stopped without an error, restarting...');
+    } catch (err) {
+      logger.error('Polling crashed, restarting...', err);
+    }
+    if (!shuttingDown) {
+      await new Promise((resolve) => setTimeout(resolve, POLLING_RETRY_DELAY_MS));
+    }
+  }
 }
 
 main().catch((err) => {

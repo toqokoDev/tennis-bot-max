@@ -30,6 +30,7 @@ import {
   editButtons,
   editText,
   formatProfileText,
+  getMaxProfileAvatarUrl,
   showProfile,
 } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
@@ -501,15 +502,7 @@ export function registerProfileEditHandlers(bot: import('@maxhub/max-bot-api').B
     const user = await resolveEditUser(ctx);
     if (!user) return;
 
-    let avatarUrl: string | undefined;
-    try {
-      if (ctx.chatId) {
-        const membership = await ctx.getChatMembership();
-        avatarUrl = membership.full_avatar_url ?? membership.avatar_url;
-      }
-    } catch {
-      /* ignore */
-    }
+    const avatarUrl = await getMaxProfileAvatarUrl(ctx);
 
     if (!avatarUrl) {
       await editText(ctx, TXT.profile.photo_no_profile, {

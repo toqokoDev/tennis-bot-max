@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "start:forever": "node scripts/run-forever.mjs node dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "keywords": ["max", "bot", "tennis", "sport"],

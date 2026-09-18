@@ -43,6 +43,16 @@ npm run build
 npm start
 ```
 
+Запуск с автоперезапуском при падении процесса (например, для systemd/pm2-less окружений):
+
+```bash
+npm run build
+npm run start:forever
+```
+
+`start:forever` оборачивает `node dist/index.js` и перезапускает процесс при любом
+аварийном завершении (с нарастающей задержкой между попытками).
+
 ## Генерация турнирной сетки
 
 Картинка сетки строится тем же Python-пакетом, что и в TennisBot (`scripts/bracket/lib` — порт `utils/bracket`).
@@ -61,8 +71,11 @@ python scripts/bracket/generate_bracket.py --input bracket.json --output bracket
 
 ```bash
 docker build -t tennisbotmax .
-docker run -d --name tennisbotmax --env-file .env -v tennisbot_data:/app/data tennisbotmax
+docker run -d --restart unless-stopped --name tennisbotmax --env-file .env -v tennisbot_data:/app/data tennisbotmax
 ```
+
+`--restart unless-stopped` перезапускает контейнер при падении процесса или
+перезагрузке хоста (кроме случаев, когда контейнер остановлен вручную).
 
 Управление контейнером:
 
@@ -94,7 +107,7 @@ docker rm -f tennisbotmax
 # пересобрать и перезапустить
 docker build -t tennisbotmax .
 docker rm -f tennisbotmax
-docker run -d --name tennisbotmax --env-file .env -v tennisbot_data:/app/data tennisbotmax
+docker run -d --restart unless-stopped --name tennisbotmax --env-file .env -v tennisbot_data:/app/data tennisbotmax
 ```
 
 ## Deep links

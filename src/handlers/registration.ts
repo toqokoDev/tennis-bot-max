@@ -30,6 +30,7 @@ import {
   editButtons,
   editText,
   formatProfileText,
+  getMaxProfileAvatarUrl,
   profileKeyboard,
   promptButtons,
   promptText,
@@ -62,8 +63,7 @@ function sportNameForLevel(sport: SportType): string {
 export async function startRegistration(ctx: AppContext): Promise<void> {
   await clearState(ctx);
   await setState(ctx, RegistrationStates.PHONE, {});
-  await editText(ctx, TXT.registration.welcome);
-  await editText(ctx, TXT.registration.phone, {
+  await editText(ctx, `${TXT.registration.welcome}\n\n${TXT.registration.phone}`, {
     attachments: [Keyboard.inlineKeyboard([[Keyboard.button.requestContact(TXT.registration.send_phone)]])],
   });
 }
@@ -769,15 +769,7 @@ export function registerRegistrationHandlers(bot: import('@maxhub/max-bot-api').
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<RegData>(ctx);
 
-    let avatarUrl: string | undefined;
-    try {
-      if (ctx.chatId) {
-        const membership = await ctx.getChatMembership();
-        avatarUrl = membership.full_avatar_url ?? membership.avatar_url;
-      }
-    } catch {
-      /* ignore */
-    }
+    const avatarUrl = await getMaxProfileAvatarUrl(ctx);
 
     if (!avatarUrl) {
       await editText(ctx, TXT.profile.photo_no_profile);
