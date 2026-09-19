@@ -11,6 +11,7 @@ import { handleProfileEditMessage } from './handlers/profileEdit.js';
 import { handleRegistrationMessage } from './handlers/registration.js';
 import { handleGameOfferMessage } from './handlers/gameOffers.js';
 import { handleBrowseRespondMessage } from './handlers/gameOffersMenu.js';
+import { handleContactShareMessage } from './handlers/contactShare.js';
 import { handleScoreMessage } from './handlers/enterScore.js';
 import { handleTourMessage } from './handlers/tours.js';
 import { handlePaymentMessage } from './handlers/payments.js';
@@ -48,6 +49,7 @@ async function runBot(): Promise<Bot<AppContext>> {
     if (await handleProfileEditMessage(ctx)) return;
     if (await handleGameOfferMessage(ctx)) return;
     if (await handleBrowseRespondMessage(ctx)) return;
+    if (await handleContactShareMessage(ctx)) return;
     if (await handleScoreMessage(ctx)) return;
     if (await handleTourMessage(ctx)) return;
     if (await handleTournamentBrowseMessage(ctx)) return;

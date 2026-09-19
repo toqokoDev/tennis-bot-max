@@ -203,6 +203,12 @@ export enum CreateTournamentStates {
   CONFIRM = 'CONFIRM',
 }
 
+export enum ContactShareStates {
+  CHOOSE = 'CONTACT_SHARE_CHOOSE',
+  INPUT = 'CONTACT_SHARE_INPUT',
+  CONFIRM = 'CONTACT_SHARE_CONFIRM',
+}
+
 export enum ViewTournamentsStates {
   SPORT = 'SPORT',
   COUNTRY = 'COUNTRY',

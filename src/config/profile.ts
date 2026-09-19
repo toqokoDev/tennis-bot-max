@@ -172,7 +172,16 @@ export const DATING_INTERESTS = [
 
 export const MEETING_TIMES = ['Утро', 'Обед', 'Вечер', 'Выходные'];
 
-export const SPORT_CHANNEL_IDS: Partial<Record<SportType, string[]>> = {};
+/**
+ * Ссылки (slug из max.ru/<slug>) на каналы для публикации уведомлений по видам спорта.
+ * Для большого тенниса первый элемент — канал "все кроме Спб", второй — канал для Спб.
+ * Виды спорта без записи в этой таблице уведомления в канал не получают.
+ */
+export const SPORT_CHANNEL_LINKS: Partial<Record<SportType, string[]>> = {
+  '🏓Настольный теннис': ['channel_table_tennis'],
+  '🎾Падл-теннис': ['channel_padelplay'],
+  '🎾Большой теннис': ['channel_tennisplay', 'channel_tennisspb'],
+};
 
 export function getSportCategory(sport: SportType): SportCategory {
   return SPORT_CATEGORIES[sport];

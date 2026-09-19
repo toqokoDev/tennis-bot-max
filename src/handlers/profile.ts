@@ -1,4 +1,4 @@
-import { TXT } from '../texts.js';
+import { TXT, fmt } from '../texts.js';
 import { Keyboard } from '@maxhub/max-bot-api';
 import type { AppContext } from '../context.js';
 import { getCtxUserId } from '../context.js';
@@ -6,9 +6,11 @@ import { storage } from '../storage/jsonStorage.js';
 import { editButtons, showProfile } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { getProfileViewContext } from '../utils/gameHistory.js';
+import { fullName } from '../utils/gameResult.js';
 import { requireRegistered } from './registration.js';
 import { hasProSubscription } from '../utils/validation.js';
 import { formatProLockedMessage } from '../utils/subscription.js';
+import { sendContactRequest } from './contactShare.js';
 import { registerProfileEditHandlers, showOwnProfile } from './profileEdit.js';
 import { registerGameHistoryHandlers } from './gameHistory.js';
 
@@ -67,15 +69,17 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
       ]);
       return;
     }
-    const rows: Array<Array<ReturnType<typeof Keyboard.button.callback> | ReturnType<typeof Keyboard.button.link>>> = [];
-    if (target.username) {
-      rows.push([Keyboard.button.link(TXT.profile.open_chat, `https://max.ru/${target.username}`)]);
-    }
-    rows.push([Keyboard.button.callback(TXT.common.back, backPayload)]);
-    const message = target.username
-      ? `📞 ${target.first_name}`
-      : `📞 ${target.first_name}: ${target.phone}`;
-    await editButtons(ctx, message, [Keyboard.inlineKeyboard(rows)]);
+
+    const sent = await sendContactRequest(ctx.api, target.max_user_id, viewer);
+    const message = sent
+      ? fmt(TXT.contact_share.request_sent, { name: fullName(target) })
+      : TXT.contact_share.send_failed;
+    await editButtons(ctx, message, [
+      Keyboard.inlineKeyboard([
+        [Keyboard.button.callback(TXT.common.back, backPayload)],
+        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+      ]),
+    ]);
   });
 
   bot.action(/^deeplink_profile_/, async (ctx) => {
