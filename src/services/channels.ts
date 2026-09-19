@@ -1,7 +1,7 @@
 import { Keyboard, type Api } from '@maxhub/max-bot-api';
 import type { AttachmentRequest } from '@maxhub/max-bot-api/types';
 import { env, getDeepLink } from '../config/env.js';
-import { SPORT_CHANNEL_LINKS, calculateAge, getSportCategory } from '../config/profile.js';
+import { SPORT_CHANNEL_IDS, calculateAge, getSportCategory } from '../config/profile.js';
 import { TXT, fmt } from '../texts.js';
 import { logger } from '../logger.js';
 import { storage } from '../storage/jsonStorage.js';
@@ -82,28 +82,14 @@ async function sendToChannel(
   }
 }
 
-const channelLinkCache = new Map<string, string>();
-
-async function resolveChatIdByLink(api: Api, link: string): Promise<string | undefined> {
-  const cached = channelLinkCache.get(link);
-  if (cached) return cached;
-  try {
-    const chat = await api.getChatByLink(link);
-    const chatId = String(chat.chat_id);
-    channelLinkCache.set(link, chatId);
-    return chatId;
-  } catch (err) {
-    logger.warn('Channel link resolve failed', { link, err });
-    return undefined;
+function resolveChannelIds(sport: SportType, city?: string): string[] {
+  const mapped = SPORT_CHANNEL_IDS[sport];
+  if (mapped?.length) {
+    if (mapped.length > 1 && city === 'Санкт-Петербург') return [mapped[1]];
+    return [mapped[0]];
   }
-}
-
-async function resolveChannelIds(api: Api, sport: SportType, city?: string): Promise<string[]> {
-  const mapped = SPORT_CHANNEL_LINKS[sport];
-  if (!mapped?.length) return [];
-  const link = mapped.length > 1 && city === 'Санкт-Петербург' ? mapped[1] : mapped[0];
-  const chatId = await resolveChatIdByLink(api, link);
-  return chatId ? [chatId] : [];
+  if (env.CHANNEL_ID) return [env.CHANNEL_ID];
+  return [];
 }
 
 function yearsOld(profile: UserProfile): string {
@@ -189,7 +175,7 @@ export async function sendRegistrationNotification(
   const photo = photoAttachment(profile.photo_path);
   if (photo) attachments.push(photo);
 
-  for (const ch of await resolveChannelIds(api, profile.sport, profile.city)) {
+  for (const ch of resolveChannelIds(profile.sport, profile.city)) {
     await sendToChannel(api, ch, text, { attachments: attachments.length ? attachments : undefined });
   }
 }
@@ -265,7 +251,7 @@ export async function sendGameOfferToChannel(
   const photo = photoAttachment(profile.photo_path);
   if (photo) attachments.push(photo);
 
-  for (const ch of await resolveChannelIds(api, offer.sport, offer.city)) {
+  for (const ch of resolveChannelIds(offer.sport, offer.city)) {
     await sendToChannel(api, ch, text, { attachments: attachments.length ? attachments : undefined });
   }
 }
@@ -367,7 +353,7 @@ export async function sendGameNotificationToChannel(
     ));
   }
 
-  for (const ch of await resolveChannelIds(api, game.sport)) {
+  for (const ch of resolveChannelIds(game.sport)) {
     await sendToChannel(api, ch, text, {
       attachments: [...attachments, ...buttons].length ? [...attachments, ...buttons] : undefined,
     });
@@ -427,7 +413,7 @@ export async function sendTournamentCreatedToChannel(
     getDeepLink(`join_tournament_${tournament.id}`),
   );
 
-  for (const ch of await resolveChannelIds(api, tournament.sport, tournament.city)) {
+  for (const ch of resolveChannelIds(tournament.sport, tournament.city)) {
     await sendToChannel(api, ch, text, { attachments: [keyboard] });
   }
 }
@@ -454,7 +440,7 @@ export async function sendTournamentStartedToChannel(
     getDeepLink(`view_tournament_${tournament.id}`),
   );
 
-  for (const ch of await resolveChannelIds(api, tournament.sport, tournament.city)) {
+  for (const ch of resolveChannelIds(tournament.sport, tournament.city)) {
     await sendToChannel(api, ch, text, { attachments: [keyboard] });
   }
 }
@@ -479,14 +465,19 @@ export async function sendTournamentApplicationToChannel(
     getDeepLink(`join_tournament_${tournament.id}`),
   ));
 
-  for (const ch of await resolveChannelIds(api, tournament.sport, tournament.city)) {
+  for (const ch of resolveChannelIds(tournament.sport, tournament.city)) {
     await sendToChannel(api, ch, text, { attachments });
   }
 }
 
-export async function notifyUser(api: Api, userId: number, text: string): Promise<void> {
+export async function notifyUser(
+  api: Api,
+  userId: number,
+  text: string,
+  extra?: { attachments?: AttachmentRequest[] },
+): Promise<void> {
   try {
-    await api.sendMessageToUser(userId, text, { format: 'html' });
+    await api.sendMessageToUser(userId, text, { format: 'html', attachments: extra?.attachments });
   } catch (err) {
     logger.warn('User notify failed', { userId, err });
   }

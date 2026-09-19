@@ -188,6 +188,8 @@ export const TXT = {
     sent_to_requester: '📩 Пользователь {name} поделился с вами контактом:\n\n{contact}',
     declined: '🚫 Вы отказались делиться контактом.',
     declined_notify: '🚫 Пользователь {name} отказался поделиться контактами.',
+    already_pending: '⏳ Запрос на получение контактов от {name} уже отправлен. Ожидайте ответа.',
+    already_received: '📞 Контакт от {name}:\n\n{contact}',
   },
   search: {
     choose_sport: '🎾 По какому виду спорта ищем партнёра?',

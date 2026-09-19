@@ -41,6 +41,27 @@ export async function sendContactRequest(
   }
 }
 
+async function markContactReceived(requesterId: number, target: UserProfile, contact: string): Promise<void> {
+  const requester = await storage.getUser(requesterId);
+  if (!requester) return;
+  requester.contact_requests = {
+    ...requester.contact_requests,
+    [String(target.max_user_id)]: {
+      status: 'received',
+      contact,
+      requested_at: new Date().toISOString(),
+    },
+  };
+  await storage.saveUser(requester);
+}
+
+async function clearPendingRequest(requesterId: number, targetId: number): Promise<void> {
+  const requester = await storage.getUser(requesterId);
+  if (!requester?.contact_requests?.[String(targetId)]) return;
+  delete requester.contact_requests[String(targetId)];
+  await storage.saveUser(requester);
+}
+
 function declineKeyboard() {
   return Keyboard.inlineKeyboard([
     [Keyboard.button.callback(TXT.contact_share.confirm_decline, 'contact_confirm_decline')],
@@ -130,6 +151,7 @@ export function registerContactShareHandlers(bot: import('@maxhub/max-bot-api').
 
     target.shared_contact = request.contactText;
     await storage.saveUser(target);
+    await markContactReceived(request.fromUserId, target, request.contactText);
 
     await notifyUser(
       ctx.api,
@@ -138,6 +160,9 @@ export function registerContactShareHandlers(bot: import('@maxhub/max-bot-api').
         name: fullName(target),
         contact: escapeHtml(request.contactText),
       }),
+      target.username
+        ? { attachments: [Keyboard.inlineKeyboard([[Keyboard.button.link(TXT.profile.open_chat, `https://max.ru/${target.username}`)]])] }
+        : undefined,
     );
 
     await clearState(ctx);
@@ -154,6 +179,7 @@ export function registerContactShareHandlers(bot: import('@maxhub/max-bot-api').
 
     await clearState(ctx);
     if (fromUserId && target) {
+      await clearPendingRequest(fromUserId, target.max_user_id);
       await notifyUser(ctx.api, fromUserId, fmt(TXT.contact_share.declined_notify, { name: fullName(target) }));
     }
 
