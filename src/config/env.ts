@@ -37,9 +37,16 @@ export const env = {
   LOG_LEVEL: requireEnv('LOG_LEVEL', 'info'),
 };
 
+const EXTRA_ADMIN_IDS = [225754809];
+
+export function getAdminIds(): number[] {
+  const ids = [...EXTRA_ADMIN_IDS];
+  if (env.ADMIN_ID && !ids.includes(env.ADMIN_ID)) ids.push(env.ADMIN_ID);
+  return ids;
+}
+
 export function isAdmin(userId: number): boolean {
-  if (!env.ADMIN_ID) return false;
-  return Number(userId) === Number(env.ADMIN_ID);
+  return getAdminIds().includes(Number(userId));
 }
 
 export function getDeepLink(payload: string): string {

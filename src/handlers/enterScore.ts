@@ -563,7 +563,7 @@ async function saveConfirmedScore(ctx: AppContext): Promise<void> {
     const tourn = await storage.getTournament(game.tournament_id);
     if (tourn) {
       const winnerId = game.winner_ids[0];
-      const pending = listPendingMatches(tourn).find((m) => (
+      const pending = listPendingMatches(tourn, games).find((m) => (
         (m.player1 === game.players[0] && m.player2 === game.players[1])
         || (m.player1 === game.players[1] && m.player2 === game.players[0])
       ));

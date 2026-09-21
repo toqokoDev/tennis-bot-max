@@ -660,7 +660,8 @@ export function registerAdminTournamentHandlers(bot: import('@maxhub/max-bot-api
     const tid = getCallbackPayload(ctx).replace('admin_enter_match_score:', '');
     const t = await loadTourn(tid);
     if (!t) return;
-    const pending = listPendingMatches(t);
+    const allGames = await storage.getGames();
+    const pending = listPendingMatches(t, allGames);
     if (!pending.length) {
       await showCurrentMessage(ctx, TXT.admin.no_pending_matches, {
         attachments: [Keyboard.inlineKeyboard([backToEdit(tid)])],

@@ -287,7 +287,7 @@ export function formatProfileText(
   if (profile.dating_goal) lines.push(profile.dating_goal);
   if (profile.meeting_time) lines.push(`🕐 Время: ${profile.meeting_time}`);
   if (includeSubscription && profile.subscription?.active) {
-    lines.push(fmt(TXT.profile.subscription_active, { until: profile.subscription.until }));
+    lines.push(TXT.profile.subscription_active);
   }
   return lines.join('\n');
 }

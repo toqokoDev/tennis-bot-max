@@ -11,7 +11,7 @@ import { env } from '../config/env.js';
 import { storage } from '../storage/jsonStorage.js';
 import type { Tournament } from '../types/models.js';
 import { generateOlympicBracket, type BracketMatch, type BracketTree } from '../utils/bracket/index.js';
-import { ensureSeeding } from '../utils/tournamentLifecycle.js';
+import { ensureSeeding, listPlacementMatchesForImage } from '../utils/tournamentLifecycle.js';
 import { logger } from '../logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -143,6 +143,24 @@ async function buildPayload(tourn: Tournament): Promise<Record<string, unknown>>
     : undefined;
   const rounds = roundsFromBracket(savedBracket ?? previewBracket);
 
+  // Матчи за 3-е и 5-8 места не хранятся в дереве сетки — их надо посчитать
+  // отдельно (с учётом BYE) и передать питоновскому рендереру явно, а не
+  // заставлять его самого угадывать пары по одним лишь `rounds` — при нечётном
+  // числе игроков угадывание даёт другие пары, чем реально были сыграны, и
+  // победитель матча за 5-е место не находится.
+  const placement_matches = savedBracket
+    ? listPlacementMatchesForImage(tourn, games).map((e) => ({
+      placement: e.place,
+      round: e.round,
+      match_number: e.matchNumber,
+      player1_id: String(e.player1),
+      player2_id: String(e.player2),
+      winner_id: e.winner != null ? String(e.winner) : null,
+      score: e.score?.length ? e.score.join(', ') : null,
+      is_bye: false,
+    }))
+    : [];
+
   return {
     name: tourn.name,
     type: tourn.type,
@@ -151,6 +169,7 @@ async function buildPayload(tourn: Tournament): Promise<Record<string, unknown>>
     players,
     rounds,
     completed_games,
+    placement_matches,
   };
 }
 

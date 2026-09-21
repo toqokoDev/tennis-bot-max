@@ -24,12 +24,21 @@ export function generateOlympicBracket(participantIds: number[]): BracketTree {
 
   while (roundPlayers.length > 1) {
     const matches: BracketMatch[] = [];
-    for (let i = 0; i < roundPlayers.length; i += 2) {
+    const half = roundPlayers.length / 2;
+    for (let i = 0; i < half; i++) {
+      // В 1-м круге сажаем BYE-слоты (хвост слотов) напротив реальных игроков
+      // по схеме "1 против N" — иначе при чётном числе BYE (например 2 свободных
+      // места из 8) они попадали бы в одну пару друг с другом, создавая матч без
+      // единого игрока, который никогда не получает победителя и «замораживает»
+      // всю ветку сетки дальше.
+      const [p1, p2] = roundNum === 1
+        ? [roundPlayers[i], roundPlayers[roundPlayers.length - 1 - i]]
+        : [roundPlayers[i * 2], roundPlayers[i * 2 + 1]];
       matches.push({
-        id: `r${roundNum}m${i / 2}`,
+        id: `r${roundNum}m${i}`,
         round: roundNum,
-        player1: roundPlayers[i],
-        player2: roundPlayers[i + 1],
+        player1: p1,
+        player2: p2,
       });
     }
     rounds.push(matches);

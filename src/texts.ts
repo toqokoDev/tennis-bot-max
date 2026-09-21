@@ -96,7 +96,7 @@ export const TXT = {
     deleted: '✅ Профиль удалён',
     stats: 'Игр: {played}, побед: {wins} ({percent}%)',
     rating: 'Рейтинг: {level} ({points} очков)',
-    subscription_active: '⭐ PRO до {until}',
+    subscription_active: '⭐ PRO',
     subscription_inactive: 'Подписка не активна',
     edit_hint: '✏️ Чтобы изменить профиль, начните регистрацию заново через /start',
     edit_menu: '✏️ Что хотите изменить?',

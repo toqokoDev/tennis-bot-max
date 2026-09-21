@@ -104,11 +104,19 @@ def generate_png_bytes(data: Dict[str, Any]) -> bytes:
             "photo_url": getattr(p, "photo_url", None),
         }
 
+    # Матчи за 3-е и 5-8 места считает Node (с учётом BYE) и присылает их уже
+    # готовыми, с тегом "placement" — тем же, который builders.py умеет читать
+    # напрямую. Так рендерер не пытается сам угадывать пары по `rounds`: при
+    # нечётном числе игроков угаданные пары не совпадали бы с реально
+    # сыгранными играми, и результат (например, победитель за 5-е место)
+    # не находился бы.
+    placement_matches = list(data.get("placement_matches") or [])
+
     tournament_data = {
         "name": name,
         "type": "Олимпийская система",
         "participants": participants,
-        "matches": rounds_to_matches(data.get("rounds") or []),
+        "matches": rounds_to_matches(data.get("rounds") or []) + placement_matches,
         "hide_bracket": False,
     }
 

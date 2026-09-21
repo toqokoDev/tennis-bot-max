@@ -1,9 +1,10 @@
-import type { Tournament } from '../types/models.js';
+import type { CompletedGame, Tournament } from '../types/models.js';
 import { PAYMENT_WINDOW_HOURS } from '../config/tournament.js';
 import {
   advanceWinner,
   generateOlympicBracket,
   generateRoundRobin,
+  type BracketMatch,
   type BracketTree,
 } from './bracket/index.js';
 import { addDays, formatDateISO } from './validation.js';
@@ -94,6 +95,27 @@ export function moveSeeding(t: Tournament, index: number, direction: 'up' | 'dow
   return { ...t, seeding };
 }
 
+/**
+ * Авто-продвижение BYE (матч с одним игроком). Свободные слоты — то есть
+ * настоящий, структурный BYE — бывают только в 1-м круге (сразу после
+ * посева). В следующих кругах пустой слот означает лишь то, что матч-«сосед»
+ * по сетке ещё не сыгран, и его нельзя путать с BYE — иначе туда без игры
+ * «прошёл» бы обладатель уже засчитанного BYE, а реальный второй финалист
+ * потерял бы свой законный матч.
+ */
+function autoAdvanceRound1Byes(bracket: BracketTree): BracketTree {
+  let result = bracket;
+  for (const m of result.rounds[0] ?? []) {
+    const onlyP1 = m.player1 != null && m.player2 == null;
+    const onlyP2 = m.player2 != null && m.player1 == null;
+    if (!m.winner && (onlyP1 || onlyP2)) {
+      const winnerId = (onlyP1 ? m.player1 : m.player2)!;
+      result = advanceWinner(result, m.id, winnerId, []);
+    }
+  }
+  return result;
+}
+
 export function startTournament(t: Tournament): Tournament {
   const seeding = ensureSeeding(t);
   const ids = seeding.map(Number);
@@ -102,24 +124,8 @@ export function startTournament(t: Tournament): Tournament {
     : undefined;
   const round_robin = t.type === 'Круговая' ? generateRoundRobin(ids) : undefined;
 
-  // Авто-продвижение BYE (матч с одним игроком)
   if (bracket) {
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const round of bracket.rounds) {
-        for (const m of round) {
-          if (m.winner) continue;
-          const onlyP1 = m.player1 != null && m.player2 == null;
-          const onlyP2 = m.player2 != null && m.player1 == null;
-          if (onlyP1 || onlyP2) {
-            const winnerId = (onlyP1 ? m.player1 : m.player2)!;
-            bracket = advanceWinner(bracket, m.id, winnerId, []);
-            changed = true;
-          }
-        }
-      }
-    }
+    bracket = autoAdvanceRound1Byes(bracket);
   }
 
   return {
@@ -187,7 +193,210 @@ export interface PendingTournamentMatch {
   label: string;
 }
 
-export function listPendingMatches(t: Tournament): PendingTournamentMatch[] {
+function findPlayedGame(
+  games: CompletedGame[],
+  tournamentId: string,
+  a: number,
+  b: number,
+): CompletedGame | undefined {
+  return games.find((g) => (
+    g.tournament_id === tournamentId
+    && ((g.players[0] === a && g.players[1] === b) || (g.players[0] === b && g.players[1] === a))
+  ));
+}
+
+/** Проигравший в реальном (не BYE) и уже сыгранном матче, иначе undefined. */
+function matchLoser(m: BracketMatch): number | undefined {
+  if (m.player1 == null || m.player2 == null || m.winner == null) return undefined;
+  return m.winner === m.player1 ? m.player2 : m.player1;
+}
+
+export interface PlacementEntry {
+  id: string;
+  place: '3rd' | '5-8' | '5th' | '7th';
+  /** Раунд внутри под-турнира за места (для группировки на картинке сетки: 0 — полуфиналы/утешительные, 1 — финал за 5-е место). */
+  round: number;
+  matchNumber: number;
+  player1: number;
+  player2: number;
+  winner?: number;
+  score?: string[];
+}
+
+/**
+ * Матч за 3-е место и матчи за 5-8 места не хранятся в дереве сетки — они
+ * вычисляются из проигравших полуфинала/четвертьфинала основной сетки и списка
+ * уже сыгранных игр. Возвращает ВСЕ такие матчи (и сыгранные, и ещё нет), чтобы
+ * этим единым источником данных могли пользоваться и выбор «что предложить
+ * доиграть» (derivePlacementMatches), и рендер картинки сетки (bracketImage.ts).
+ */
+function computePlacementEntries(t: Tournament, games: CompletedGame[]): PlacementEntry[] {
+  if (t.type !== 'Олимпийская система' || !t.bracket) return [];
+  const tree = t.bracket as unknown as BracketTree;
+  const rounds = tree.rounds ?? [];
+  const result: PlacementEntry[] = [];
+
+  if (rounds.length >= 2) {
+    const sf = rounds[rounds.length - 2]!;
+    if (sf.length === 2) {
+      const l0 = matchLoser(sf[0]!);
+      const l1 = matchLoser(sf[1]!);
+      if (l0 != null && l1 != null) {
+        const played = findPlayedGame(games, t.id, l0, l1);
+        result.push({
+          id: 'third_place',
+          place: '3rd',
+          round: 0,
+          matchNumber: 0,
+          player1: l0,
+          player2: l1,
+          winner: played?.winner_ids[0],
+          score: played?.sets,
+        });
+      }
+    }
+  }
+
+  if (rounds.length >= 3) {
+    const qf = rounds[rounds.length - 3]!;
+    // Реальные проигравшие четвертьфинала (те, у кого действительно был соперник —
+    // игрок, прошедший по BYE, «проигравшим» здесь не становится). При нечётном
+    // числе участников таких игроков может быть 2 или 3, а не только 4, поэтому
+    // вместо жёсткой пары семифиналов строим для них отдельную под-сетку того же
+    // вида, что и основная (со своим BYE при нечётном количестве).
+    const losers = qf.map((m) => matchLoser(m)).filter((id): id is number => id != null);
+
+    if (losers.length >= 2) {
+      const sub = buildResolvedSubBracket(losers, 'p58_', t, games);
+
+      if (sub.rounds.length >= 2) {
+        sub.rounds[0]!.forEach((m, i) => {
+          if (m.player1 != null && m.player2 != null) {
+            result.push({
+              id: m.id,
+              place: '5-8',
+              round: 0,
+              matchNumber: i,
+              player1: m.player1,
+              player2: m.player2,
+              winner: m.winner,
+              score: m.score,
+            });
+          }
+        });
+
+        const semi = sub.rounds[sub.rounds.length - 2]!;
+        if (semi.length === 2) {
+          const l0 = matchLoser(semi[0]!);
+          const l1 = matchLoser(semi[1]!);
+          if (l0 != null && l1 != null) {
+            const played = findPlayedGame(games, t.id, l0, l1);
+            result.push({
+              id: 'p58_seventh',
+              place: '7th',
+              round: 0,
+              matchNumber: 0,
+              player1: l0,
+              player2: l1,
+              winner: played?.winner_ids[0],
+              score: played?.sets,
+            });
+          }
+        }
+      }
+
+      const finalMatch = sub.rounds[sub.rounds.length - 1]![0];
+      if (finalMatch && finalMatch.player1 != null && finalMatch.player2 != null) {
+        result.push({
+          id: finalMatch.id,
+          place: '5th',
+          // Если в под-сетке всего 1 круг (ровно 2 реальных проигравших
+          // четвертьфинала — своей пары за 5-8 место нет), этот же матч —
+          // одновременно и «полуфинал», и «финал»: он должен попасть в тот же
+          // относительный круг 0, что и пары за 5-8 место, иначе на картинке
+          // сетки для него не найдётся места и раздел «за 5-е место» пропадёт.
+          round: sub.rounds.length - 1,
+          matchNumber: 0,
+          player1: finalMatch.player1,
+          player2: finalMatch.player2,
+          winner: finalMatch.winner,
+          score: finalMatch.score,
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+/** Все матчи за места (сыгранные и нет) — используется рендером картинки сетки. */
+export function listPlacementMatchesForImage(t: Tournament, games: CompletedGame[]): PlacementEntry[] {
+  return computePlacementEntries(t, games);
+}
+
+function derivePlacementMatches(t: Tournament, games: CompletedGame[]): PendingTournamentMatch[] {
+  const nameOf = (id: number) => t.participants[String(id)]?.name ?? String(id);
+  const labels: Record<PlacementEntry['place'], string> = {
+    '3rd': '🥉 За 3-е место',
+    '5-8': '5-8 место',
+    '5th': 'За 5-е место',
+    '7th': 'За 7-е место',
+  };
+  return computePlacementEntries(t, games)
+    .filter((e) => e.winner == null)
+    .map((e) => ({
+      id: e.id,
+      round: e.round,
+      player1: e.player1,
+      player2: e.player2,
+      label: e.place === '5-8'
+        ? `5-8 место (пара ${e.matchNumber + 1}): ${nameOf(e.player1)} — ${nameOf(e.player2)}`
+        : `${labels[e.place]}: ${nameOf(e.player1)} — ${nameOf(e.player2)}`,
+    }));
+}
+
+/**
+ * Строит вспомогательную под-сетку олимпийской системы для списка игроков
+ * (например, проигравших четвертьфинала — для определения 5–8 мест) и
+ * «доигрывает» в ней всё, что уже сыграно по данным `games`. Использует те же
+ * генератор сетки и BYE-логику, что и основной турнир, поэтому корректно
+ * работает при любом (в т.ч. нечётном) числе игроков в под-сетке.
+ */
+function buildResolvedSubBracket(
+  players: number[],
+  idPrefix: string,
+  t: Tournament,
+  games: CompletedGame[],
+): BracketTree {
+  const raw = generateOlympicBracket(players);
+  let tree: BracketTree = {
+    rounds: raw.rounds.map((round) => round.map((m) => ({
+      ...m,
+      id: `${idPrefix}${m.id}`,
+      next_match_id: m.next_match_id ? `${idPrefix}${m.next_match_id}` : undefined,
+    }))),
+  };
+  tree = autoAdvanceRound1Byes(tree);
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const round of tree.rounds) {
+      for (const m of round) {
+        if (m.winner != null || m.player1 == null || m.player2 == null) continue;
+        const played = findPlayedGame(games, t.id, m.player1, m.player2);
+        if (played) {
+          const winnerId = played.winner_ids[0] ?? m.player1;
+          tree = advanceWinner(tree, m.id, winnerId, played.sets);
+          changed = true;
+        }
+      }
+    }
+  }
+  return tree;
+}
+
+export function listPendingMatches(t: Tournament, games: CompletedGame[] = []): PendingTournamentMatch[] {
   const pending: PendingTournamentMatch[] = [];
   if (t.type === 'Олимпийская система' && t.bracket) {
     const tree = t.bracket as unknown as BracketTree;
@@ -206,6 +415,7 @@ export function listPendingMatches(t: Tournament): PendingTournamentMatch[] {
         });
       }
     }
+    pending.push(...derivePlacementMatches(t, games));
   } else if (t.type === 'Круговая' && t.round_robin) {
     const rr = t.round_robin as {
       matches?: Array<{ p1: number; p2: number; played?: boolean; id?: string }>;
