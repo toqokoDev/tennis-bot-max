@@ -1,8 +1,10 @@
 import { spawn } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 import type { Api } from '@maxhub/max-bot-api';
 import type { AttachmentRequest } from '@maxhub/max-bot-api/types';
 import { env } from '../config/env.js';
@@ -16,6 +18,37 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'scripts', 'bracket', 'generate_bracket.py');
 const CACHE_DIR = path.join(env.DATA_DIR, 'brackets');
+const AVATAR_CACHE_DIR = path.join(env.DATA_DIR, 'avatars');
+
+/**
+ * Profile photos are stored as remote URLs (MAX CDN / tennis-play.com), but the
+ * Python bracket renderer can only draw local files. Download and cache each
+ * photo locally so the bracket image can actually show it instead of silently
+ * falling back to initials. Cache key is a hash of the URL, so a changed photo
+ * gets its own file automatically.
+ */
+async function resolveAvatarPath(url: string | null | undefined): Promise<string | null> {
+  if (!url) return null;
+  if (!/^https?:\/\//i.test(url)) return url;
+  try {
+    const hash = crypto.createHash('md5').update(url).digest('hex');
+    const ext = path.extname(new URL(url).pathname).slice(0, 5) || '.jpg';
+    const filePath = path.join(AVATAR_CACHE_DIR, `${hash}${ext}`);
+    try {
+      await fs.access(filePath);
+      return filePath;
+    } catch {
+      // not cached yet, fall through to download
+    }
+    await fs.mkdir(AVATAR_CACHE_DIR, { recursive: true });
+    const res = await axios.get<ArrayBuffer>(url, { responseType: 'arraybuffer', timeout: 15000 });
+    await fs.writeFile(filePath, Buffer.from(res.data));
+    return filePath;
+  } catch (err) {
+    logger.warn('Failed to cache avatar for bracket image', { err: String(err), url });
+    return null;
+  }
+}
 
 type BracketPlayer = { id: string; name: string; photo_path?: string | null };
 type BracketRoundMatch = {
@@ -73,15 +106,18 @@ function roundsFromBracket(bracket: BracketTree | undefined): BracketRoundMatch[
 
 async function buildPayload(tourn: Tournament): Promise<Record<string, unknown>> {
   const users = await storage.getUsers();
-  const players: BracketPlayer[] = Object.values(tourn.participants).map((p) => {
-    const u = users[String(p.user_id)];
-    return {
-      id: String(p.user_id),
-      name: p.name || `${u?.first_name ?? ''} ${u?.last_name ?? ''}`.trim() || String(p.user_id),
-      photo_path: u?.photo_path ?? null,
-      photo_url: u?.photo_path ?? null,
-    };
-  });
+  const players: BracketPlayer[] = await Promise.all(
+    Object.values(tourn.participants).map(async (p) => {
+      const u = users[String(p.user_id)];
+      const avatarPath = await resolveAvatarPath(u?.photo_path);
+      return {
+        id: String(p.user_id),
+        name: p.name || `${u?.first_name ?? ''} ${u?.last_name ?? ''}`.trim() || String(p.user_id),
+        photo_path: avatarPath,
+        photo_url: avatarPath,
+      };
+    }),
+  );
 
   const games = await storage.getGames();
   const completed_games = games
