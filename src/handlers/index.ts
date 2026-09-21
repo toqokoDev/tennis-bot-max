@@ -3,7 +3,6 @@ import type { AppContext } from '../context.js';
 import { registerStartHandlers } from './start.js';
 import { registerRegistrationHandlers } from './registration.js';
 import { registerProfileHandlers } from './profile.js';
-import { registerContactShareHandlers } from './contactShare.js';
 import { registerSearchHandlers } from './searchPartner.js';
 import { registerGameOfferHandlers } from './gameOffers.js';
 import { registerBrowseOffersHandlers } from './gameOffersMenu.js';
@@ -22,7 +21,6 @@ export function registerAllHandlers(bot: Bot<AppContext>): void {
   registerStartHandlers(bot);
   registerRegistrationHandlers(bot);
   registerProfileHandlers(bot);
-  registerContactShareHandlers(bot);
   registerSearchHandlers(bot);
   registerGameOfferHandlers(bot);
   registerBrowseOffersHandlers(bot);

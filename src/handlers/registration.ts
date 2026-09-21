@@ -13,7 +13,6 @@ import {
   ROLES,
   getLevelsForSport,
   getSportFieldConfig,
-  hasVacation,
 } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import {
@@ -29,9 +28,7 @@ import {
   chunkButtonsTrailing,
   editButtons,
   editText,
-  formatProfileText,
   getMaxProfileAvatarUrl,
-  profileKeyboard,
   promptButtons,
   promptText,
   sportButtonRows,
@@ -40,8 +37,6 @@ import {
   isValidDate,
   isValidPhone,
   normalizePhone,
-  isFutureOrTodayDate,
-  isDateRangeValid,
 } from '../utils/validation.js';
 import { sendRegistrationNotification } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
@@ -226,53 +221,6 @@ async function askAfterProfileComment(ctx: AppContext, data: RegData): Promise<v
   await askPhoto(ctx, data);
 }
 
-async function askVacationOrFinish(ctx: AppContext, data: RegData, userId: number): Promise<void> {
-  if (data.sport && hasVacation(data.sport)) {
-    await setState(ctx, RegistrationStates.VACATION_TENNIS, data);
-    await promptButtons(ctx, TXT.registration.vacation_tennis, [
-      Keyboard.inlineKeyboard([
-        [Keyboard.button.callback(TXT.common.yes, 'regvac_yes'), Keyboard.button.callback(TXT.common.no, 'regvac_no')],
-      ]),
-    ]);
-    return;
-  }
-  await finishRegistration(ctx, data, userId);
-}
-
-async function askVacationCountry(ctx: AppContext, data: RegData): Promise<void> {
-  await setState(ctx, RegistrationStates.VACATION_COUNTRY, data);
-  await promptButtons(ctx, TXT.registration.vacation_country, [
-    Keyboard.inlineKeyboard(
-      chunkButtonsTrailing(
-        Object.keys(COUNTRIES),
-        TXT.registration.other_country,
-        (c) => Keyboard.button.callback(c, `regvaccountry_${encodeURIComponent(c)}`),
-        2,
-      ),
-    ),
-  ]);
-}
-
-async function askVacationCity(ctx: AppContext, data: RegData): Promise<void> {
-  const cities = COUNTRIES[data.vacation_country ?? ''] ?? [];
-  if (!cities.length) {
-    await setState(ctx, RegistrationStates.VACATION_CITY_INPUT, data);
-    await promptText(ctx, TXT.registration.vacation_city);
-    return;
-  }
-  await setState(ctx, RegistrationStates.VACATION_CITY, data);
-  await promptButtons(ctx, TXT.registration.vacation_city, [
-    Keyboard.inlineKeyboard(
-      chunkButtonsTrailing(
-        cities,
-        TXT.registration.other_city,
-        (c) => Keyboard.button.callback(c, `regvaccity_${encodeURIComponent(c)}`),
-        2,
-      ),
-    ),
-  ]);
-}
-
 async function askAfterPhoto(ctx: AppContext, data: RegData, userId: number): Promise<void> {
   const config = getSportFieldConfig(data.sport!);
   if (config.hasPayment) {
@@ -280,7 +228,7 @@ async function askAfterPhoto(ctx: AppContext, data: RegData, userId: number): Pr
     await showPaymentTypes(ctx);
     return;
   }
-  await askVacationOrFinish(ctx, data, userId);
+  await finishRegistration(ctx, data, userId);
 }
 
 async function showRole(ctx: AppContext, data: RegData): Promise<void> {
@@ -460,16 +408,13 @@ async function finishRegistration(ctx: AppContext, data: RegData, userId: number
   await clearState(ctx);
   ctx.profile = profile;
 
-  const profileText = formatProfileText(profile);
-  const text = `${TXT.registration.complete}\n\n${profileText}`;
-  const attachments = profileKeyboard(profile, { isOwn: true });
-  if (profile.photo_path) {
-    attachments.unshift({
-      type: 'image',
-      payload: { url: profile.photo_path },
-    });
-  }
-  await promptButtons(ctx, text, attachments);
+  await promptButtons(ctx, TXT.registration.community_welcome, [
+    Keyboard.inlineKeyboard([
+      [Keyboard.button.callback(TXT.registration.create_tour_button, 'create_tour')],
+      [Keyboard.button.callback(TXT.registration.new_offer_button, 'new_offer')],
+      [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+    ]),
+  ]);
 }
 
 export async function handleRegistrationMessage(ctx: AppContext): Promise<boolean> {
@@ -615,58 +560,9 @@ export async function handleRegistrationMessage(ctx: AppContext): Promise<boolea
     return true;
   }
 
-  if (state === RegistrationStates.VACATION_START) {
-    if (!text || !isValidDate(text) || !isFutureOrTodayDate(text)) {
-      await promptText(ctx, TXT.registration.vacation_date_invalid);
-      return true;
-    }
-    data.vacation_start = text;
-    await setState(ctx, RegistrationStates.VACATION_END, data);
-    await promptText(ctx, TXT.registration.vacation_end);
-    return true;
-  }
-
-  if (state === RegistrationStates.VACATION_END) {
-    if (!text || !isValidDate(text) || !data.vacation_start || !isDateRangeValid(data.vacation_start, text)) {
-      await promptText(ctx, TXT.registration.vacation_range_invalid);
-      return true;
-    }
-    data.vacation_end = text;
-    await setState(ctx, RegistrationStates.VACATION_COMMENT, data);
-    await promptText(ctx, TXT.registration.vacation_comment);
-    return true;
-  }
-
-  if (state === RegistrationStates.VACATION_COMMENT) {
-    data.vacation_comment = text && text !== '/skip' ? text : '';
-    await finishRegistration(ctx, data, userId);
-    return true;
-  }
-
   if (state === RegistrationStates.DATING_ADDITIONAL) {
     if (text && text !== '/skip') data.dating_additional = text;
     await askPhoto(ctx, data);
-    return true;
-  }
-
-  if (state === RegistrationStates.VACATION_COUNTRY_INPUT) {
-    if (!text) {
-      await promptText(ctx, TXT.registration.enter_country);
-      return true;
-    }
-    data.vacation_country = text;
-    await askVacationCity(ctx, data);
-    return true;
-  }
-
-  if (state === RegistrationStates.VACATION_CITY_INPUT) {
-    if (!text) {
-      await promptText(ctx, TXT.registration.enter_city);
-      return true;
-    }
-    data.vacation_city = text;
-    await setState(ctx, RegistrationStates.VACATION_START, data);
-    await promptText(ctx, TXT.registration.vacation_start);
     return true;
   }
 
@@ -751,7 +647,7 @@ export function registerRegistrationHandlers(bot: import('@maxhub/max-bot-api').
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<RegData>(ctx);
     data.default_payment = decodeURIComponent(getCallbackPayload(ctx).replace('regpay_', ''));
-    await askVacationOrFinish(ctx, data, getCtxUserId(ctx));
+    await finishRegistration(ctx, data, getCtxUserId(ctx));
   });
 
   bot.action(/^reggender_/, async (ctx) => {
@@ -787,47 +683,6 @@ export function registerRegistrationHandlers(bot: import('@maxhub/max-bot-api').
     await ctx.answerOnCallback({ notification: 'OK' });
     const data = getStateData<RegData>(ctx);
     await askAfterPhoto(ctx, data, getCtxUserId(ctx));
-  });
-
-  bot.action('regvac_yes', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    const data = getStateData<RegData>(ctx);
-    data.vacation_tennis = true;
-    await askVacationCountry(ctx, data);
-  });
-
-  bot.action('regvac_no', async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    const data = getStateData<RegData>(ctx);
-    data.vacation_tennis = false;
-    await finishRegistration(ctx, data, getCtxUserId(ctx));
-  });
-
-  bot.action(/^regvaccountry_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    const country = decodeURIComponent(getCallbackPayload(ctx).replace('regvaccountry_', ''));
-    const data = getStateData<RegData>(ctx);
-    if (country === TXT.registration.other_country) {
-      await setState(ctx, RegistrationStates.VACATION_COUNTRY_INPUT, data);
-      await editText(ctx, TXT.registration.enter_country);
-      return;
-    }
-    data.vacation_country = country;
-    await askVacationCity(ctx, data);
-  });
-
-  bot.action(/^regvaccity_/, async (ctx) => {
-    await ctx.answerOnCallback({ notification: 'OK' });
-    const city = decodeURIComponent(getCallbackPayload(ctx).replace('regvaccity_', ''));
-    const data = getStateData<RegData>(ctx);
-    if (city === TXT.registration.other_city) {
-      await setState(ctx, RegistrationStates.VACATION_CITY_INPUT, data);
-      await editText(ctx, TXT.registration.enter_city);
-      return;
-    }
-    data.vacation_city = city;
-    await setState(ctx, RegistrationStates.VACATION_START, data);
-    await editText(ctx, TXT.registration.vacation_start);
   });
 
   bot.action(/^regdatinggoal_/, async (ctx) => {

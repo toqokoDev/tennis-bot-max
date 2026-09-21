@@ -10,8 +10,7 @@ import { fullName } from '../utils/gameResult.js';
 import { requireRegistered } from './registration.js';
 import { hasProSubscription } from '../utils/validation.js';
 import { formatProLockedMessage } from '../utils/subscription.js';
-import { sendContactRequest } from './contactShare.js';
-import { escapeHtml } from '../services/channels.js';
+import { sendContactCard } from '../services/channels.js';
 import { registerProfileEditHandlers, showOwnProfile } from './profileEdit.js';
 import { registerGameHistoryHandlers } from './gameHistory.js';
 
@@ -71,44 +70,47 @@ export function registerProfileHandlers(bot: import('@maxhub/max-bot-api').Bot<A
       return;
     }
 
-    const existing = viewer.contact_requests?.[String(target.max_user_id)];
+    await editButtons(ctx, fmt(TXT.contact_share.consent_prompt, { name: fullName(target) }), [
+      Keyboard.inlineKeyboard([
+        [
+          Keyboard.button.callback(TXT.common.yes, `contact_send_yes:${targetId}`),
+          Keyboard.button.callback(TXT.common.no, `contact_send_no:${targetId}`),
+        ],
+      ]),
+    ]);
+  });
 
-    if (existing?.status === 'received' && existing.contact) {
-      const rows: Array<Array<ReturnType<typeof Keyboard.button.callback> | ReturnType<typeof Keyboard.button.link>>> = [];
-      if (target.username) {
-        rows.push([Keyboard.button.link(TXT.profile.open_chat, `https://max.ru/${target.username}`)]);
-      }
-      rows.push([Keyboard.button.callback(TXT.common.back, backPayload)]);
-      rows.push([Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]);
-      await editButtons(ctx, fmt(TXT.contact_share.already_received, {
-        name: fullName(target),
-        contact: escapeHtml(existing.contact),
-      }), [Keyboard.inlineKeyboard(rows)]);
-      return;
-    }
-
-    if (existing?.status === 'pending') {
-      await editButtons(ctx, fmt(TXT.contact_share.already_pending, { name: fullName(target) }), [
-        Keyboard.inlineKeyboard([
-          [Keyboard.button.callback(TXT.common.back, backPayload)],
-          [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-        ]),
+  bot.action(/^contact_send_yes:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const viewer = await requireRegistered(ctx);
+    if (!viewer) return;
+    const targetId = Number(getCallbackPayload(ctx).replace('contact_send_yes:', ''));
+    const backPayload = profileReopenPayload(ctx, targetId);
+    const target = await storage.getUser(targetId);
+    if (!target) {
+      await editButtons(ctx, TXT.profile.not_found, [
+        Keyboard.inlineKeyboard([[Keyboard.button.callback(TXT.common.main_menu, 'main_menu')]]),
       ]);
       return;
     }
 
-    const sent = await sendContactRequest(ctx.api, target.max_user_id, viewer);
-    if (sent) {
-      viewer.contact_requests = {
-        ...viewer.contact_requests,
-        [String(target.max_user_id)]: { status: 'pending', requested_at: new Date().toISOString() },
-      };
-      await storage.saveUser(viewer);
-    }
+    const sent = await sendContactCard(ctx.api, target.max_user_id, viewer);
     const message = sent
-      ? fmt(TXT.contact_share.request_sent, { name: fullName(target) })
+      ? fmt(TXT.contact_share.sent, { name: fullName(target) })
       : TXT.contact_share.send_failed;
     await editButtons(ctx, message, [
+      Keyboard.inlineKeyboard([
+        [Keyboard.button.callback(TXT.common.back, backPayload)],
+        [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+      ]),
+    ]);
+  });
+
+  bot.action(/^contact_send_no:/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const targetId = Number(getCallbackPayload(ctx).replace('contact_send_no:', ''));
+    const backPayload = profileReopenPayload(ctx, targetId);
+    await editButtons(ctx, TXT.contact_share.cancelled, [
       Keyboard.inlineKeyboard([
         [Keyboard.button.callback(TXT.common.back, backPayload)],
         [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],

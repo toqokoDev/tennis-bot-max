@@ -5,6 +5,8 @@ import { SPORT_CHANNEL_IDS, calculateAge, getSportCategory } from '../config/pro
 import { TXT, fmt } from '../texts.js';
 import { logger } from '../logger.js';
 import { storage } from '../storage/jsonStorage.js';
+import { formatAgeYears, formatProfileText } from '../utils/bot.js';
+import { fullName } from '../utils/gameResult.js';
 import type {
   CompletedGame,
   GameOffer,
@@ -480,5 +482,45 @@ export async function notifyUser(
     await api.sendMessageToUser(userId, text, { format: 'html', attachments: extra?.attachments });
   } catch (err) {
     logger.warn('User notify failed', { userId, err });
+  }
+}
+
+/**
+ * Отправляет получателю анкету и контакты запросившего связь пользователя (после его согласия).
+ * Возвращает false, если доставить сообщение не удалось (например, получатель ещё не запускал бота).
+ */
+function nameWithAge(profile: UserProfile): string {
+  const name = fullName(profile);
+  if (!profile.birth_date) return name;
+  const age = calculateAge(profile.birth_date);
+  if (!age || age <= 0) return name;
+  return `${name} (${formatAgeYears(age)})`;
+}
+
+export async function sendContactCard(
+  api: Api,
+  targetUserId: number,
+  requester: UserProfile,
+): Promise<boolean> {
+  let text = `${fmt(TXT.contact_share.request_header, { name: nameWithAge(requester) })}\n\n`;
+  text += formatProfileText(requester, { includeStats: false, includeSubscription: false, includeIdentity: false });
+  text += `\n\n${TXT.contact_share.contacts_label}\n📱 ${escapeHtml(requester.phone)}`;
+
+  const attachments: AttachmentRequest[] = [];
+  const photo = photoAttachment(requester.photo_path);
+  if (photo) attachments.push(photo);
+  if (requester.username) {
+    attachments.push(linkButton(TXT.profile.open_chat, `https://max.ru/${requester.username}`));
+  }
+
+  try {
+    await api.sendMessageToUser(targetUserId, text, {
+      format: 'html',
+      attachments: attachments.length ? attachments : undefined,
+    });
+    return true;
+  } catch (err) {
+    logger.warn('Contact card send failed', { targetUserId, err });
+    return false;
   }
 }

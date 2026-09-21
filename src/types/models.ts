@@ -100,20 +100,6 @@ export interface UserProfile {
   dating_additional?: string;
   meeting_time?: string;
   offer_responses?: OfferResponse[];
-  /** Последний контакт (телефон/почта/ссылка), которым пользователь делился по запросу другого игрока. */
-  shared_contact?: string;
-  /**
-   * Запросы контактов, отправленные этим пользователем другим игрокам (ключ — max_user_id адресата, строкой).
-   * Не даёт повторно слать запрос, пока предыдущий не отвечен ('pending'), и сразу показывает контакт
-   * без нового запроса, если он уже был получен ('received').
-   */
-  contact_requests?: Record<string, ContactRequestInfo>;
-}
-
-export interface ContactRequestInfo {
-  status: 'pending' | 'received';
-  contact?: string;
-  requested_at: string;
 }
 
 export interface OfferResponse {

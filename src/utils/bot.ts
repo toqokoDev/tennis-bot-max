@@ -216,7 +216,7 @@ export async function showCurrentMessage(
   return editButtons(ctx, text, attachments, extra);
 }
 
-function formatAgeYears(age: number): string {
+export function formatAgeYears(age: number): string {
   const n = Math.abs(age) % 100;
   const n1 = n % 10;
   if (n > 10 && n < 20) return `${age} лет`;
@@ -225,19 +225,30 @@ function formatAgeYears(age: number): string {
   return `${age} лет`;
 }
 
-function formatPaymentLabel(payment: string): string {
-  return payment.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || payment;
+function stripLeadingEmoji(value: string): string {
+  return value.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || value;
 }
 
-export function formatProfileText(profile: UserProfile): string {
-  const lines = [`👤 ${fullName(profile)}`];
-  if (profile.birth_date) {
-    lines.push(`🎂 Возраст: ${formatAgeYears(calculateAge(profile.birth_date))}`);
+function formatPaymentLabel(payment: string): string {
+  return stripLeadingEmoji(payment);
+}
+
+export function formatProfileText(
+  profile: UserProfile,
+  options: { includeStats?: boolean; includeSubscription?: boolean; includeIdentity?: boolean } = {},
+): string {
+  const { includeStats = true, includeSubscription = true, includeIdentity = true } = options;
+  const lines: string[] = [];
+  if (includeIdentity) {
+    lines.push(`👤 ${fullName(profile)}`);
+    if (profile.birth_date) {
+      lines.push(`🎂 Возраст: ${formatAgeYears(calculateAge(profile.birth_date))}`);
+    }
+    lines.push('');
   }
-  lines.push('');
 
   if (getSportCategory(profile.sport) === 'court_sport') {
-    lines.push(`🔎 Роль: ${profile.role}`);
+    lines.push(`🔎 Роль: ${stripLeadingEmoji(profile.role)}`);
     if (profile.player_level) {
       lines.push(`🏆 Уровень: ${profile.player_level} (${profile.rating_points} очков)`);
     }
@@ -248,13 +259,13 @@ export function formatProfileText(profile: UserProfile): string {
   }
 
   lines.push(
-    `🌍 Страна: ${profile.country}`,
+    `🌍 Страна: ${stripLeadingEmoji(profile.country)}`,
     `🏙 Город: ${profile.city}${profile.district ? `, ${profile.district}` : ''}`,
-    `🗂 Вид спорта: ${profile.sport}`,
+    `🗂 Вид спорта: ${stripLeadingEmoji(profile.sport)}`,
     `👫 Пол: ${profile.gender}`,
   );
 
-  if (getSportCategory(profile.sport) === 'court_sport') {
+  if (includeStats && getSportCategory(profile.sport) === 'court_sport') {
     lines.push(
       '',
       '📊 Статистика игр:',
@@ -271,11 +282,11 @@ export function formatProfileText(profile: UserProfile): string {
 
   if (profile.profile_comment) lines.push('', TXT.profile.about_label, profile.profile_comment);
   if (profile.vacation_tennis && profile.vacation_city) {
-    lines.push(`✈️ ${profile.vacation_country} ${profile.vacation_city} ${profile.vacation_start}-${profile.vacation_end}`);
+    lines.push(`✈️ ${stripLeadingEmoji(profile.vacation_country ?? '')} ${profile.vacation_city} ${profile.vacation_start}-${profile.vacation_end}`);
   }
   if (profile.dating_goal) lines.push(profile.dating_goal);
   if (profile.meeting_time) lines.push(`🕐 Время: ${profile.meeting_time}`);
-  if (profile.subscription?.active) {
+  if (includeSubscription && profile.subscription?.active) {
     lines.push(fmt(TXT.profile.subscription_active, { until: profile.subscription.until }));
   }
   return lines.join('\n');
