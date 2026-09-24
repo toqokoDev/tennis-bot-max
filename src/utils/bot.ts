@@ -225,7 +225,8 @@ export function formatAgeYears(age: number): string {
   return `${age} лет`;
 }
 
-function stripLeadingEmoji(value: string): string {
+/** Убирает эмодзи в начале значения (вид спорта, страна, оплата…), чтобы не дублировать иконку строки. */
+export function stripLeadingEmoji(value: string): string {
   return value.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || value;
 }
 

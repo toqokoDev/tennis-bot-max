@@ -7,7 +7,7 @@ import { storage } from '../storage/jsonStorage.js';
 import { getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseOffersStates } from '../types/states.js';
 import type { GameOffer, SportType, UserProfile } from '../types/models.js';
-import { paginate, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
+import { paginate, showCurrentMessage, sportButtonRows, stripLeadingEmoji } from '../utils/bot.js';
 import { escapeHtml, notifyUser, sendContactCard } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -98,21 +98,21 @@ function formatOfferDetail(user: UserProfile, offer: GameOffer, viewerId: number
   }
 
   lines.push(
-    `🌍 ${offer.country}, ${offer.city}${offer.district ? ` ${offer.district}` : ''}`,
+    `🌍 ${stripLeadingEmoji(offer.country)}, ${offer.city}${offer.district ? ` ${offer.district}` : ''}`,
     `📅 ${offer.date}`,
     `⏰ ${offer.time}`,
   );
 
   if (cat === 'court_sport') {
     if (offer.game_type) lines.push(`🔍 ${offer.game_type}`);
-    if (offer.payment_type) lines.push(`💳 ${offer.payment_type}`);
+    if (offer.payment_type) lines.push(`💳 ${stripLeadingEmoji(offer.payment_type)}`);
     if (offer.competitive !== undefined) {
       lines.push(`🏆 На счёт: ${offer.competitive ? 'Да' : 'Нет'}`);
     }
   }
   if (cat === 'dating') {
-    if (offer.dating_goal) lines.push(`💕 ${offer.dating_goal}`);
-    if (offer.dating_interests?.length) lines.push(`🎯 ${offer.dating_interests.join(', ')}`);
+    if (offer.dating_goal) lines.push(`💕 ${stripLeadingEmoji(offer.dating_goal)}`);
+    if (offer.dating_interests?.length) lines.push(`🎯 ${offer.dating_interests.map(stripLeadingEmoji).join(', ')}`);
     if (offer.dating_additional) lines.push(`📝 ${offer.dating_additional}`);
   }
   if (offer.comment) lines.push(`💬 ${offer.comment}`);
@@ -178,7 +178,7 @@ async function showCountrySelection(ctx: AppContext, data: BrowseData): Promise<
   rows.push([Keyboard.button.callback(TXT.game_offers.browse_offer_game, `new_offer_${encodeURIComponent(data.sport!)}`)]);
   rows.push([Keyboard.button.callback(TXT.game_offers.browse_back_sport, 'browse_back_sport')]);
 
-  await showCurrentMessage(ctx, fmt(TXT.game_offers.browse_country, { sport: data.sport! }), {
+  await showCurrentMessage(ctx, fmt(TXT.game_offers.browse_country, { sport: stripLeadingEmoji(data.sport!) }), {
     attachments: [Keyboard.inlineKeyboard(rows)],
   });
 }
@@ -217,7 +217,7 @@ async function showCitySelection(ctx: AppContext, data: BrowseData): Promise<voi
   rows.push([Keyboard.button.callback(TXT.game_offers.browse_offer_game, `new_offer_${encodeURIComponent(data.sport!)}`)]);
   rows.push([Keyboard.button.callback(TXT.game_offers.browse_back_country, 'browse_back_country')]);
 
-  await showCurrentMessage(ctx, fmt(TXT.game_offers.browse_city, { sport: data.sport!, country: data.country! }), {
+  await showCurrentMessage(ctx, fmt(TXT.game_offers.browse_city, { sport: stripLeadingEmoji(data.sport!), country: data.country! }), {
     attachments: [Keyboard.inlineKeyboard(rows)],
   });
 }
@@ -253,7 +253,7 @@ async function showOfferList(ctx: AppContext): Promise<void> {
   buttons.push([Keyboard.button.callback(TXT.game_offers.browse_back_city, 'browse_back_city')]);
 
   await showCurrentMessage(ctx, fmt(TXT.game_offers.browse_list, {
-    sport: data.sport!,
+    sport: stripLeadingEmoji(data.sport!),
     city: data.city!,
     page,
     total: totalPages,
@@ -439,7 +439,7 @@ async function sendOfferResponse(ctx: AppContext, shareContacts: boolean): Promi
     userId,
     `📩 Отклик от ${escapeHtml(`${responder.first_name} ${responder.last_name}`)}
 `
-    + `🎾 ${offer?.sport ?? '—'} · ${offer?.date ?? '—'} ${offer?.time ?? '—'}
+    + `${offer?.sport ?? '—'} · ${offer?.date ?? '—'} ${offer?.time ?? '—'}
 `
     + `💬 ${escapeHtml(comment)}`,
   );

@@ -23,6 +23,7 @@ import {
   askText,
   chunkButtons,
   showCurrentMessage,
+  stripLeadingEmoji,
 } from '../utils/bot.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import {
@@ -153,7 +154,7 @@ export async function showTournamentEdit(ctx: AppContext, tournamentId: string):
   const ready = canStartTournament(t) ? TXT.admin.tournament_ready : '';
   const text = fmt(TXT.admin.tournament_view, {
     name: t.name,
-    sport: t.sport,
+    sport: stripLeadingEmoji(t.sport),
     location: tournamentLocation(t),
     type: t.type,
     participants: Object.keys(t.participants).length,

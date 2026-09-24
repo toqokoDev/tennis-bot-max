@@ -7,7 +7,7 @@ import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseToursStates, CreateTourStates } from '../types/states.js';
 import type { SportType, UserProfile } from '../types/models.js';
-import { chunkButtons, showCurrentMessage, askText, editText, editButtons, replyButtons, sportButtonRows } from '../utils/bot.js';
+import { chunkButtons, showCurrentMessage, askText, editText, editButtons, replyButtons, sportButtonRows, stripLeadingEmoji } from '../utils/bot.js';
 import {
   isValidDate,
   isFutureOrTodayDate,
@@ -36,7 +36,7 @@ type TourCreateData = {
 
 function formatTourCard(user: UserProfile): string {
   return fmt(TXT.tours.current, {
-    country: user.vacation_country ?? '',
+    country: stripLeadingEmoji(user.vacation_country ?? ''),
     city: user.vacation_city ?? '',
     start: user.vacation_start ?? '',
     end: user.vacation_end ?? '',

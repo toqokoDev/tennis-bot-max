@@ -24,7 +24,7 @@ import {
   ViewTournamentsStates,
 } from '../types/states.js';
 import type { SportType, Tournament, UserProfile } from '../types/models.js';
-import { chunkButtons, showCurrentMessage, askText, backButton } from '../utils/bot.js';
+import { chunkButtons, showCurrentMessage, askText, backButton, stripLeadingEmoji } from '../utils/bot.js';
 import {
   addParticipant,
   canStartTournament,
@@ -236,7 +236,7 @@ async function showBrowseCountry(ctx: AppContext, data: ViewData): Promise<void>
     2,
   );
   rows.push([Keyboard.button.callback(TXT.tournament.other_country, 'tviewcountry_other')]);
-  await showCurrentMessage(ctx, fmt(TXT.tournament.step2, { sport: data.sport! }), {
+  await showCurrentMessage(ctx, fmt(TXT.tournament.step2, { sport: stripLeadingEmoji(data.sport!) }), {
     attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
   });
 }
@@ -257,8 +257,8 @@ async function showBrowseCity(ctx: AppContext, data: ViewData): Promise<void> {
   }
   rows.push([Keyboard.button.callback(TXT.common.back, 'tournament_list')]);
   await showCurrentMessage(ctx, fmt(TXT.tournament.step3, {
-    sport: data.sport!,
-    country: data.country!,
+    sport: stripLeadingEmoji(data.sport!),
+    country: stripLeadingEmoji(data.country!),
   }), {
     attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
   });
@@ -272,8 +272,8 @@ async function showBrowseDistrict(ctx: AppContext, data: ViewData): Promise<void
     2,
   );
   await showCurrentMessage(ctx, fmt(TXT.tournament.step4_district, {
-    sport: data.sport!,
-    country: data.country!,
+    sport: stripLeadingEmoji(data.sport!),
+    country: stripLeadingEmoji(data.country!),
     city: data.city!,
   }), {
     attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
@@ -284,14 +284,14 @@ async function showBrowseGender(ctx: AppContext, data: ViewData): Promise<void> 
   await setState(ctx, ViewTournamentsStates.GENDER, data);
   const text = data.district
     ? fmt(TXT.tournament.step5_gender, {
-      sport: data.sport!,
-      country: data.country!,
+      sport: stripLeadingEmoji(data.sport!),
+      country: stripLeadingEmoji(data.country!),
       city: data.city!,
       district: data.district,
     })
     : fmt(TXT.tournament.step4_gender, {
-      sport: data.sport!,
-      country: data.country!,
+      sport: stripLeadingEmoji(data.sport!),
+      country: stripLeadingEmoji(data.country!),
       city: data.city!,
     });
   await showCurrentMessage(ctx, text, {
@@ -960,7 +960,7 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
       2,
     );
     rows.push([Keyboard.button.callback(TXT.common.back, 'tournament_list')]);
-    await showCurrentMessage(ctx, fmt(TXT.tournament.step2_enter, { sport: data.sport! }), {
+    await showCurrentMessage(ctx, fmt(TXT.tournament.step2_enter, { sport: stripLeadingEmoji(data.sport!) }), {
       attachments: [Keyboard.inlineKeyboard(withMainMenu(rows))],
     });
   });
@@ -1143,8 +1143,8 @@ export function registerTournamentHandlers(bot: import('@maxhub/max-bot-api').Bo
     if (data.city === 'Москва') {
       await setState(ctx, CreateTournamentStates.DISTRICT, data);
       await showCurrentMessage(ctx, fmt(TXT.tournament.step4_district, {
-        sport: data.sport!,
-        country: data.country!,
+        sport: stripLeadingEmoji(data.sport!),
+        country: stripLeadingEmoji(data.country!),
         city: data.city!,
       }), {
         attachments: [Keyboard.inlineKeyboard(withMainMenu(

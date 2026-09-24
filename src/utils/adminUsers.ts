@@ -3,7 +3,7 @@ import { TXT, fmt } from '../texts.js';
 import type { AppContext } from '../context.js';
 import { storage } from '../storage/jsonStorage.js';
 import type { SubscriptionInfo } from '../types/models.js';
-import { showCurrentMessage } from './bot.js';
+import { showCurrentMessage, stripLeadingEmoji } from './bot.js';
 
 const DEFAULT_BACK_PAYLOAD = 'admin_manage_subscription_menu';
 
@@ -70,12 +70,12 @@ export async function showUserAdminCard(
   }
   buttons.push([Keyboard.button.callback(TXT.admin.back, effectiveBack)]);
 
-  const location = [user.city, user.country].filter(Boolean).join(', ') || '—';
+  const location = [user.city, user.country && stripLeadingEmoji(user.country)].filter(Boolean).join(', ') || '—';
   await showCurrentMessage(ctx, fmt(TXT.admin.user_card, {
     name: `${user.first_name} ${user.last_name}`.trim() || '—',
     id: userId,
     phone: user.phone || '—',
-    sport: user.sport || '—',
+    sport: stripLeadingEmoji(user.sport || '—'),
     location,
     rating: user.rating_points ?? 0,
     level: user.player_level || '—',

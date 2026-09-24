@@ -15,7 +15,7 @@ import { storage } from '../storage/jsonStorage.js';
 import { clearState, getState, getStateData, setState } from '../middleware/session.js';
 import { GameOfferStates } from '../types/states.js';
 import type { GameOffer, SportType } from '../types/models.js';
-import { backButton, chunkButtons, chunkButtonsTrailing, editText, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
+import { backButton, chunkButtons, chunkButtonsTrailing, editText, showCurrentMessage, sportButtonRows, stripLeadingEmoji } from '../utils/bot.js';
 import {
   buildOfferDateButtons,
   buildOfferTimeButtons,
@@ -62,8 +62,8 @@ type OfferData = Partial<GameOffer> & {
 
 function formatOfferDetails(offer: GameOffer): string {
   const lines = [
-    `🗂 ${offer.sport}`,
-    `🌍 ${offer.country}, ${offer.city}${offer.district ? ` — ${offer.district}` : ''}`,
+    `🗂 ${stripLeadingEmoji(offer.sport)}`,
+    `🌍 ${stripLeadingEmoji(offer.country)}, ${offer.city}${offer.district ? ` — ${offer.district}` : ''}`,
   ];
   const cat = getSportCategory(offer.sport);
   if (cat !== 'meeting' || offer.date) {
@@ -71,14 +71,14 @@ function formatOfferDetails(offer: GameOffer): string {
   }
   if (cat === 'court_sport') {
     if (offer.game_type) lines.push(`🔍 ${offer.game_type}`);
-    if (offer.payment_type) lines.push(`💳 ${offer.payment_type}`);
+    if (offer.payment_type) lines.push(`💳 ${stripLeadingEmoji(offer.payment_type)}`);
     if (offer.competitive !== undefined) {
       lines.push(`🏆 На счёт: ${offer.competitive ? 'Да' : 'Нет'}`);
     }
   }
   if (cat === 'dating') {
-    if (offer.dating_goal) lines.push(`💕 ${offer.dating_goal}`);
-    if (offer.dating_interests?.length) lines.push(`🎯 ${offer.dating_interests.join(', ')}`);
+    if (offer.dating_goal) lines.push(`💕 ${stripLeadingEmoji(offer.dating_goal)}`);
+    if (offer.dating_interests?.length) lines.push(`🎯 ${offer.dating_interests.map(stripLeadingEmoji).join(', ')}`);
     if (offer.dating_additional) lines.push(`📝 ${offer.dating_additional}`);
   }
   if (offer.comment) lines.push(`💬 ${offer.comment}`);
@@ -91,9 +91,9 @@ function formatPublishedOffer(offer: GameOffer, id: number): string {
     TXT.game_offers.published,
     '',
     fmt(TXT.game_offers.published_header, { id }),
-    fmt(TXT.game_offers.view_sport, { sport: offer.sport }),
+    fmt(TXT.game_offers.view_sport, { sport: stripLeadingEmoji(offer.sport) }),
     '',
-    fmt(TXT.game_offers.view_country, { country: offer.country }),
+    fmt(TXT.game_offers.view_country, { country: stripLeadingEmoji(offer.country) }),
     offer.district
       ? fmt(TXT.game_offers.view_city_district, { city: offer.city, district: offer.district })
       : fmt(TXT.game_offers.view_city, { city: offer.city }),
@@ -104,15 +104,15 @@ function formatPublishedOffer(offer: GameOffer, id: number): string {
 
   if (cat === 'court_sport') {
     if (offer.game_type) lines.push(fmt(TXT.game_offers.view_game_type, { game_type: offer.game_type }));
-    if (offer.payment_type) lines.push(fmt(TXT.game_offers.view_payment, { payment: offer.payment_type }));
+    if (offer.payment_type) lines.push(fmt(TXT.game_offers.view_payment, { payment: stripLeadingEmoji(offer.payment_type) }));
     if (offer.competitive !== undefined) {
       lines.push(fmt(TXT.game_offers.view_competitive, { value: offer.competitive ? 'Да' : 'Нет' }));
     }
   }
   if (cat === 'dating') {
-    if (offer.dating_goal) lines.push(fmt(TXT.game_offers.view_dating_goal, { value: offer.dating_goal }));
+    if (offer.dating_goal) lines.push(fmt(TXT.game_offers.view_dating_goal, { value: stripLeadingEmoji(offer.dating_goal) }));
     if (offer.dating_interests?.length) {
-      lines.push(fmt(TXT.game_offers.view_dating_interests, { value: offer.dating_interests.join(', ') }));
+      lines.push(fmt(TXT.game_offers.view_dating_interests, { value: offer.dating_interests.map(stripLeadingEmoji).join(', ') }));
     }
     if (offer.dating_additional) {
       lines.push(fmt(TXT.game_offers.view_dating_additional, { value: offer.dating_additional }));

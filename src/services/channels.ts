@@ -5,7 +5,7 @@ import { SPORT_CHANNEL_IDS, calculateAge, getSportCategory } from '../config/pro
 import { TXT, fmt } from '../texts.js';
 import { logger } from '../logger.js';
 import { storage } from '../storage/jsonStorage.js';
-import { formatAgeYears, formatProfileText } from '../utils/bot.js';
+import { formatAgeYears, formatProfileText, stripLeadingEmoji } from '../utils/bot.js';
 import { fullName } from '../utils/gameResult.js';
 import type {
   CompletedGame,
@@ -111,7 +111,7 @@ export async function sendRegistrationNotification(
   const gender = profile.gender || '';
   const genderEmoji = gender === 'Мужской' ? '👨' : gender === 'Женский' ? '👩' : '👤';
   const category = getSportCategory(profile.sport);
-  const sportEscaped = escapeHtml(profile.sport);
+  const sportEscaped = escapeHtml(stripLeadingEmoji(profile.sport));
   let text: string;
 
   if (isTrainer(profile)) {
@@ -147,10 +147,10 @@ export async function sendRegistrationNotification(
 
   if (category === 'dating') {
     if (profile.dating_goal) {
-      text += `💕 ${TXT.channels.dating_goal} ${escapeHtml(profile.dating_goal)}\n`;
+      text += `💕 ${TXT.channels.dating_goal} ${escapeHtml(stripLeadingEmoji(profile.dating_goal))}\n`;
     }
     if (profile.dating_interests?.length) {
-      text += `🎯 ${TXT.channels.interests} ${escapeHtml(profile.dating_interests.join(', '))}\n`;
+      text += `🎯 ${TXT.channels.interests} ${escapeHtml(profile.dating_interests.map(stripLeadingEmoji).join(', '))}\n`;
     }
     if (profile.dating_additional) {
       text += `📝 ${TXT.channels.about} ${escapeHtml(profile.dating_additional)}`;
@@ -166,7 +166,7 @@ export async function sendRegistrationNotification(
     }
   } else {
     if (profile.default_payment) {
-      text += `\n💳 ${TXT.channels.court_payment} ${escapeHtml(profile.default_payment)}\n`;
+      text += `\n💳 ${TXT.channels.court_payment} ${escapeHtml(stripLeadingEmoji(profile.default_payment))}\n`;
     }
     if (profile.profile_comment) {
       text += `💬 ${TXT.channels.about} ${escapeHtml(profile.profile_comment)}`;
@@ -205,10 +205,10 @@ export async function sendGameOfferToChannel(
     text += `📍 ${TXT.channels.city} ${location}\n`;
     text += `📅 ${TXT.channels.date_time} ${date} в ${time}\n`;
     if (offer.dating_goal) {
-      text += `💕 ${TXT.channels.dating_goal} ${escapeHtml(offer.dating_goal)}\n`;
+      text += `💕 ${TXT.channels.dating_goal} ${escapeHtml(stripLeadingEmoji(offer.dating_goal))}\n`;
     }
     if (offer.dating_interests?.length) {
-      text += `🎯 ${TXT.channels.interests} ${escapeHtml(offer.dating_interests.join(', '))}\n`;
+      text += `🎯 ${TXT.channels.interests} ${escapeHtml(offer.dating_interests.map(stripLeadingEmoji).join(', '))}\n`;
     }
     if (offer.dating_additional) {
       text += `📝 ${TXT.channels.about} ${escapeHtml(offer.dating_additional)}\n`;
@@ -226,7 +226,7 @@ export async function sendGameOfferToChannel(
     text += `👤 ${profileLink}\n`;
     text += `📍 ${TXT.channels.city} ${location}\n`;
     text += `📅 ${TXT.channels.date_time} ${date} в ${time}\n`;
-    text += `🎯 ${TXT.channels.sport} ${escapeHtml(offer.sport)}\n`;
+    text += `🎯 ${TXT.channels.sport} ${escapeHtml(stripLeadingEmoji(offer.sport))}\n`;
   } else {
     const levelText = offer.sport === '🏓Настольный теннис'
       ? fmt(TXT.channels.table_tennis_rating, { rating: profile.player_level ?? '—' })
@@ -237,9 +237,9 @@ export async function sendGameOfferToChannel(
     text += `${levelText}\n`;
     text += `📍 ${TXT.channels.city} ${location}\n`;
     text += `📅 ${TXT.channels.date_time} ${date} в ${time}\n`;
-    text += `🎯 ${TXT.channels.sport} ${escapeHtml(offer.sport)}\n`;
+    text += `🎯 ${TXT.channels.sport} ${escapeHtml(stripLeadingEmoji(offer.sport))}\n`;
     text += `🔍 ${TXT.channels.game_type} ${escapeHtml(offer.game_type || '—')}\n`;
-    text += `💳 ${TXT.channels.payment} ${escapeHtml(offer.payment_type || '—')}`;
+    text += `💳 ${TXT.channels.payment} ${escapeHtml(stripLeadingEmoji(offer.payment_type || '—'))}`;
     if (offer.competitive) {
       text += `\n${TXT.channels.competitive_game}`;
     }
