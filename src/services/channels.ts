@@ -489,7 +489,7 @@ export async function notifyUser(
  * Отправляет получателю анкету и контакты запросившего связь пользователя (после его согласия).
  * Возвращает false, если доставить сообщение не удалось (например, получатель ещё не запускал бота).
  */
-function nameWithAge(profile: UserProfile): string {
+export function nameWithAge(profile: UserProfile): string {
   const name = fullName(profile);
   if (!profile.birth_date) return name;
   const age = calculateAge(profile.birth_date);

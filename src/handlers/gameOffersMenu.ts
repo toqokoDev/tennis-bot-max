@@ -6,8 +6,8 @@ import { getSportCategory } from '../config/profile.js';
 import { storage } from '../storage/jsonStorage.js';
 import { getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseOffersStates } from '../types/states.js';
-import type { GameOffer, SportType, UserProfile } from '../types/models.js';
-import { paginate, showCurrentMessage, sportButtonRows, stripLeadingEmoji } from '../utils/bot.js';
+import type { GameOffer, OfferResponse, SportType, UserProfile } from '../types/models.js';
+import { editButtons, paginate, showCurrentMessage, sportButtonRows, stripLeadingEmoji } from '../utils/bot.js';
 import { escapeHtml, notifyUser, sendContactCard } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
@@ -341,6 +341,71 @@ export function registerBrowseOffersHandlers(bot: import('@maxhub/max-bot-api').
     await sendOfferResponse(ctx, shareContacts);
   });
 
+  // Автор предложения нажал «Получить контакты» под откликом
+  bot.action(/^offer_get_contacts:/, async (ctx) => {
+    const [responderId, gameId] = getCallbackPayload(ctx).replace('offer_get_contacts:', '').split(':').map(Number);
+    const author = await storage.getUser(getCtxUserId(ctx));
+    const responder = await storage.getUser(responderId);
+    const response = author && findLatestResponse(author, responderId, gameId);
+    if (!author || !responder || !response) {
+      await ctx.answerOnCallback({ notification: TXT.profile.not_found });
+      return;
+    }
+
+    if (response.contacts_shared) {
+      const sent = await sendContactCard(ctx.api, author.max_user_id, responder);
+      await ctx.answerOnCallback({ notification: sent ? 'OK' : TXT.contact_share.send_failed });
+      return;
+    }
+
+    const offer = author.games.find((g) => g.id === gameId);
+    await notifyUser(ctx.api, responderId, fmt(TXT.game_offers.respond_contacts_request, {
+      id: gameId,
+      offer: offer ? escapeHtml(`${offer.sport}, ${offer.date} ${offer.time}`) : '—',
+      name: escapeHtml(fullName(author)),
+    }), {
+      attachments: [Keyboard.inlineKeyboard([[
+        Keyboard.button.callback(TXT.common.yes, `offer_share_yes:${author.max_user_id}:${gameId}`),
+        Keyboard.button.callback(TXT.common.no, `offer_share_no:${author.max_user_id}:${gameId}`),
+      ]])],
+    });
+    await ctx.answerOnCallback({ notification: TXT.game_offers.respond_contacts_requested });
+  });
+
+  // Откликнувшийся отвечает на запрос контактов от автора
+  bot.action(/^offer_share_(yes|no):/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const payload = getCallbackPayload(ctx);
+    const agreed = payload.startsWith('offer_share_yes:');
+    const [authorId, gameId] = payload.replace(/^offer_share_(yes|no):/, '').split(':').map(Number);
+    const responder = await requireRegistered(ctx);
+    if (!responder) return;
+    const author = await storage.getUser(authorId);
+    if (!author) {
+      await editButtons(ctx, TXT.profile.not_found, []);
+      return;
+    }
+
+    if (!agreed) {
+      await notifyUser(ctx.api, authorId, fmt(TXT.game_offers.respond_contacts_declined, {
+        id: gameId,
+        name: escapeHtml(fullName(responder)),
+      }));
+      await editButtons(ctx, TXT.contact_share.cancelled, []);
+      return;
+    }
+
+    const response = findLatestResponse(author, responder.max_user_id, gameId);
+    if (response) {
+      response.contacts_shared = true;
+      await storage.saveUser(author);
+    }
+    const sent = await sendContactCard(ctx.api, authorId, responder);
+    await editButtons(ctx, sent
+      ? fmt(TXT.contact_share.sent, { name: fullName(author) })
+      : TXT.contact_share.send_failed, []);
+  });
+
   bot.action('browse_back_sport', async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
     await startBrowseOffers(ctx);
@@ -395,6 +460,12 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
   return true;
 }
 
+function findLatestResponse(author: UserProfile, responderId: number, gameId: number): OfferResponse | undefined {
+  return [...(author.offer_responses ?? [])]
+    .reverse()
+    .find((r) => r.from_user_id === responderId && r.game_id === gameId);
+}
+
 async function sendOfferResponse(ctx: AppContext, shareContacts: boolean): Promise<void> {
   const data = getStateData<BrowseData>(ctx);
   if (getState(ctx) !== BrowseOffersStates.RESPOND || !data.respondOffer?.comment) return;
@@ -420,18 +491,29 @@ async function sendOfferResponse(ctx: AppContext, shareContacts: boolean): Promi
     await storage.saveUser(author);
   }
 
-  await notifyUser(
-    ctx.api,
-    userId,
-    `📩 Отклик от ${escapeHtml(`${responder.first_name} ${responder.last_name}`)}
-`
-    + `${offer?.sport ?? '—'} · ${offer?.date ?? '—'} ${offer?.time ?? '—'}
-`
-    + `💬 ${escapeHtml(comment)}`,
-  );
-  if (shareContacts) {
-    await sendContactCard(ctx.api, userId, responder);
+  const lines: string[] = [TXT.game_offers.respond_notify_title];
+  if (offer) {
+    lines.push(
+      '',
+      fmt(TXT.game_offers.respond_notify_offer, { id: offer.id }),
+      escapeHtml(offer.sport),
+      `📅 ${escapeHtml(offer.date ?? '—')} · ⏰ ${escapeHtml(offer.time ?? '—')}`,
+      `📍 ${escapeHtml(offer.city)}${offer.district ? `, ${escapeHtml(offer.district)}` : ''}`,
+    );
   }
+  lines.push(
+    '',
+    TXT.game_offers.respond_notify_comment,
+    `<i>${escapeHtml(comment)}</i>`,
+  );
+  await notifyUser(ctx.api, userId, lines.join('\n'), {
+    attachments: [Keyboard.inlineKeyboard([
+      [Keyboard.button.callback(
+        TXT.game_offers.respond_get_contacts,
+        `offer_get_contacts:${responder.max_user_id}:${gameId}`,
+      )],
+    ])],
+  });
 
   data.respondOffer = undefined;
   await setState(ctx, BrowseOffersStates.LIST, data);
