@@ -265,6 +265,9 @@ export function formatProfileText(
     `🗂 Вид спорта: ${stripLeadingEmoji(profile.sport)}`,
     `👫 Пол: ${profile.gender}`,
   );
+  if (profile.default_payment && hasCourtPayment(profile.sport)) {
+    lines.push(`💳 Оплата корта: ${formatPaymentLabel(profile.default_payment)}`);
+  }
 
   if (includeStats && getSportCategory(profile.sport) === 'court_sport') {
     lines.push(
@@ -273,23 +276,20 @@ export function formatProfileText(
       `• Сыграно: ${profile.games_played}`,
       `• Побед: ${profile.games_wins}`,
     );
-  } else {
-    lines.push('');
-  }
-
-  if (profile.default_payment && hasCourtPayment(profile.sport)) {
-    lines.push('', `💳 Оплата корта: ${formatPaymentLabel(profile.default_payment)}`);
   }
 
   if (profile.profile_comment) lines.push('', TXT.profile.about_label, profile.profile_comment);
+
+  const extras: string[] = [];
   if (profile.vacation_tennis && profile.vacation_city) {
-    lines.push(`✈️ ${stripLeadingEmoji(profile.vacation_country ?? '')} ${profile.vacation_city} ${profile.vacation_start}-${profile.vacation_end}`);
+    extras.push(`✈️ ${stripLeadingEmoji(profile.vacation_country ?? '')} ${profile.vacation_city} ${profile.vacation_start}-${profile.vacation_end}`);
   }
-  if (profile.dating_goal) lines.push(profile.dating_goal);
-  if (profile.meeting_time) lines.push(`🕐 Время: ${profile.meeting_time}`);
+  if (profile.dating_goal) extras.push(profile.dating_goal);
+  if (profile.meeting_time) extras.push(`🕐 Время: ${profile.meeting_time}`);
   if (includeSubscription && profile.subscription?.active) {
-    lines.push(TXT.profile.subscription_active);
+    extras.push(TXT.profile.subscription_active);
   }
+  if (extras.length) lines.push('', ...extras);
   return lines.join('\n');
 }
 

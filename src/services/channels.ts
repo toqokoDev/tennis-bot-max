@@ -503,8 +503,8 @@ export async function sendContactCard(
   requester: UserProfile,
 ): Promise<boolean> {
   let text = `${fmt(TXT.contact_share.request_header, { name: nameWithAge(requester) })}\n\n`;
-  text += formatProfileText(requester, { includeStats: false, includeSubscription: false, includeIdentity: false });
-  text += `\n\n${TXT.contact_share.contacts_label}\n📱 ${escapeHtml(requester.phone)}`;
+  text += `${TXT.contact_share.contacts_label}\n📱 ${escapeHtml(requester.phone)}\n\n`;
+  text += formatProfileText(requester, { includeStats: false, includeSubscription: false, includeIdentity: false }).trimEnd();
 
   const attachments: AttachmentRequest[] = [];
   const photo = photoAttachment(requester.photo_path);
