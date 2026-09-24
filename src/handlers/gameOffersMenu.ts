@@ -11,8 +11,7 @@ import { paginate, showCurrentMessage, sportButtonRows, stripLeadingEmoji } from
 import { escapeHtml, notifyUser, sendContactCard } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
-import { hasProSubscription, parseOfferDateTime } from '../utils/validation.js';
-import { formatProLockedMessage } from '../utils/subscription.js';
+import { parseOfferDateTime } from '../utils/validation.js';
 import { fullName } from '../utils/gameResult.js';
 
 const ITEMS_PER_PAGE = 5;
@@ -330,18 +329,6 @@ export function registerBrowseOffersHandlers(bot: import('@maxhub/max-bot-api').
     const parts = getCallbackPayload(ctx).replace('respond_offer_', '').split('_');
     const gameId = Number(parts.pop());
     const userId = Number(parts.join('_'));
-    if (!hasProSubscription(responder)) {
-      await showCurrentMessage(ctx, formatProLockedMessage('offer_respond', responder.max_user_id), {
-        format: 'html',
-        attachments: [Keyboard.inlineKeyboard([
-          [Keyboard.button.callback(TXT.menu.payments, 'menu:payments')],
-          [Keyboard.button.callback(TXT.menu.invite, 'menu:invite')],
-          [Keyboard.button.callback(TXT.common.back, `viewoffer_${userId}_${gameId}`)],
-          [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
-        ])],
-      });
-      return;
-    }
     const data = getStateData<BrowseData>(ctx);
     data.respondOffer = { userId, gameId };
     await setState(ctx, BrowseOffersStates.RESPOND, data);
