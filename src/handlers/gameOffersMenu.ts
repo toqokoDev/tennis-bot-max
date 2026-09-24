@@ -13,7 +13,6 @@ import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
 import { hasProSubscription, parseOfferDateTime } from '../utils/validation.js';
 import { formatProLockedMessage } from '../utils/subscription.js';
-import { isAdmin } from '../config/env.js';
 import { fullName } from '../utils/gameResult.js';
 
 const ITEMS_PER_PAGE = 5;
@@ -331,7 +330,7 @@ export function registerBrowseOffersHandlers(bot: import('@maxhub/max-bot-api').
     const parts = getCallbackPayload(ctx).replace('respond_offer_', '').split('_');
     const gameId = Number(parts.pop());
     const userId = Number(parts.join('_'));
-    if (!hasProSubscription(responder) && !isAdmin(responder.max_user_id)) {
+    if (!hasProSubscription(responder)) {
       await showCurrentMessage(ctx, formatProLockedMessage('offer_respond', responder.max_user_id), {
         format: 'html',
         attachments: [Keyboard.inlineKeyboard([
