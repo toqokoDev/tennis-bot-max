@@ -5,7 +5,8 @@ export type ProLockFeature =
   | 'contacts'
   | 'all_players'
   | 'enter_score'
-  | 'game_history';
+  | 'game_history'
+  | 'offer_respond';
 
 /** Сообщение «доступ закрыт» в стиле TennisBot (Telegram). */
 export function formatProLockedMessage(feature: ProLockFeature, userId: number): string {

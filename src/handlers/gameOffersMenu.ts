@@ -8,10 +8,13 @@ import { getState, getStateData, setState } from '../middleware/session.js';
 import { BrowseOffersStates } from '../types/states.js';
 import type { GameOffer, SportType, UserProfile } from '../types/models.js';
 import { paginate, showCurrentMessage, sportButtonRows } from '../utils/bot.js';
-import { notifyUser } from '../services/channels.js';
+import { escapeHtml, notifyUser, sendContactCard } from '../services/channels.js';
 import { getCallbackPayload } from '../utils/callback.js';
 import { requireRegistered } from './registration.js';
-import { parseOfferDateTime } from '../utils/validation.js';
+import { hasProSubscription, parseOfferDateTime } from '../utils/validation.js';
+import { formatProLockedMessage } from '../utils/subscription.js';
+import { isAdmin } from '../config/env.js';
+import { fullName } from '../utils/gameResult.js';
 
 const ITEMS_PER_PAGE = 5;
 
@@ -20,7 +23,7 @@ type BrowseData = {
   country?: string;
   city?: string;
   page?: number;
-  respondOffer?: { userId: number; gameId: number };
+  respondOffer?: { userId: number; gameId: number; comment?: string };
 };
 
 type ListedOffer = { user: UserProfile; offer: GameOffer };
@@ -323,13 +326,33 @@ export function registerBrowseOffersHandlers(bot: import('@maxhub/max-bot-api').
 
   bot.action(/^respond_offer_/, async (ctx) => {
     await ctx.answerOnCallback({ notification: 'OK' });
+    const responder = await requireRegistered(ctx);
+    if (!responder) return;
     const parts = getCallbackPayload(ctx).replace('respond_offer_', '').split('_');
     const gameId = Number(parts.pop());
     const userId = Number(parts.join('_'));
+    if (!hasProSubscription(responder) && !isAdmin(responder.max_user_id)) {
+      await showCurrentMessage(ctx, formatProLockedMessage('offer_respond', responder.max_user_id), {
+        format: 'html',
+        attachments: [Keyboard.inlineKeyboard([
+          [Keyboard.button.callback(TXT.menu.payments, 'menu:payments')],
+          [Keyboard.button.callback(TXT.menu.invite, 'menu:invite')],
+          [Keyboard.button.callback(TXT.common.back, `viewoffer_${userId}_${gameId}`)],
+          [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
+        ])],
+      });
+      return;
+    }
     const data = getStateData<BrowseData>(ctx);
     data.respondOffer = { userId, gameId };
     await setState(ctx, BrowseOffersStates.RESPOND, data);
     await showCurrentMessage(ctx, TXT.game_offers.respond_comment, {}, 'edit');
+  });
+
+  bot.action(/^respond_contacts_(yes|no)$/, async (ctx) => {
+    await ctx.answerOnCallback({ notification: 'OK' });
+    const shareContacts = getCallbackPayload(ctx) === 'respond_contacts_yes';
+    await sendOfferResponse(ctx, shareContacts);
   });
 
   bot.action('browse_back_sport', async (ctx) => {
@@ -369,12 +392,31 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
   const text = getMessageText(ctx);
   if (!text) return false;
 
+  data.respondOffer.comment = text === '/skip' ? TXT.game_offers.respond_no_comment : text;
+  await setState(ctx, BrowseOffersStates.RESPOND, data);
+
+  const author = await storage.getUser(data.respondOffer.userId);
+  await showCurrentMessage(ctx, fmt(TXT.game_offers.respond_share_contacts, {
+    name: author ? fullName(author) : '',
+  }), {
+    attachments: [Keyboard.inlineKeyboard([
+      [
+        Keyboard.button.callback(TXT.common.yes, 'respond_contacts_yes'),
+        Keyboard.button.callback(TXT.common.no, 'respond_contacts_no'),
+      ],
+    ])],
+  }, 'new');
+  return true;
+}
+
+async function sendOfferResponse(ctx: AppContext, shareContacts: boolean): Promise<void> {
+  const data = getStateData<BrowseData>(ctx);
+  if (getState(ctx) !== BrowseOffersStates.RESPOND || !data.respondOffer?.comment) return;
+
   const responder = await requireRegistered(ctx);
-  if (!responder) return true;
+  if (!responder) return;
 
-  const comment = text === '/skip' ? TXT.game_offers.respond_no_comment : text;
-  const { userId, gameId } = data.respondOffer;
-
+  const { userId, gameId, comment } = data.respondOffer;
   const author = await storage.getUser(userId);
   const offer = author?.games.find((g) => g.id === gameId);
 
@@ -385,6 +427,7 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
       from_name: `${responder.first_name} ${responder.last_name}`.trim(),
       game_id: gameId,
       comment,
+      contacts_shared: shareContacts,
       status: 'new',
       response_date: new Date().toISOString(),
     });
@@ -394,10 +437,15 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
   await notifyUser(
     ctx.api,
     userId,
-    `📩 Отклик от ${responder.first_name} ${responder.last_name}\n`
-    + `🎾 ${offer?.sport ?? '—'} · ${offer?.date ?? '—'} ${offer?.time ?? '—'}\n`
-    + `💬 ${comment}`,
+    `📩 Отклик от ${escapeHtml(`${responder.first_name} ${responder.last_name}`)}
+`
+    + `🎾 ${offer?.sport ?? '—'} · ${offer?.date ?? '—'} ${offer?.time ?? '—'}
+`
+    + `💬 ${escapeHtml(comment)}`,
   );
+  if (shareContacts) {
+    await sendContactCard(ctx.api, userId, responder);
+  }
 
   data.respondOffer = undefined;
   await setState(ctx, BrowseOffersStates.LIST, data);
@@ -407,5 +455,4 @@ export async function handleBrowseRespondMessage(ctx: AppContext): Promise<boole
       [Keyboard.button.callback(TXT.common.main_menu, 'main_menu')],
     ])],
   }, 'edit');
-  return true;
 }

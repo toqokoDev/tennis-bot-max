@@ -107,6 +107,7 @@ export interface OfferResponse {
   from_name: string;
   game_id: number;
   comment: string;
+  contacts_shared?: boolean;
   status: 'new' | 'read';
   response_date: string;
 }
